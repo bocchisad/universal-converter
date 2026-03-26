@@ -5,16 +5,16 @@
 ## Обзор
 
 Это универсальное HTML5 приложение, которое предоставляет веб-интерфейс для конвертации:
-- Документов офисного формата (ODT, DOCX, TXT, CSV, XLSX, Markdown, HTML)
+- Документов офисного формата (ODT, DOCX, PDF, TXT, CSV, XLSX, Markdown, HTML)
 - Изображений (PNG, JPG, WEBP)
-- В различные целевые форматы (PDF, DOCX, CSV, XLSX, PNG, JPG, HTML)
+- В различные целевые форматы (PDF, DOCX, TXT, CSV, XLSX, PNG, JPG, HTML)
 
-Все преобразования происходят полностью в браузере пользователя без отправки данных на сервер.
+Все преобразования происходят полностью в браузере пользователя без отправки данных на сервер. Поддержка Cyrillic кодировки для всех текстовых операций.
 
 ## Функциональность
 
 - Конвертация на стороне клиента без загрузки файлов на серверы
-- Поддержка 11+ форматов конвертации
+- Поддержка 25+ форматов конвертации
 - Интерфейс с поддержкой перетаскивания (drag-and-drop)
 - Валидация файла и отображение размера
 - Обратная связь о статусе конвертации в реальном времени
@@ -27,39 +27,42 @@
 ## Поддерживаемые конвертации
 
 ### Документы Office
-- ODT → DOCX (OpenDocument в Word с сохранением текста)
-- DOCX → PDF (Word в PDF с метаданными)
+- ODT ↔ DOCX (OpenDocument ↔ Word с сохранением текста)
+- DOCX → PDF (Word в PDF с UTF-8 поддержкой)
+- DOCX → TXT (Word в простой текст с Cyrillic)
+- PDF → TXT (извлечение текста из PDF через PDF.js)
+- PDF → DOCX (PDF в Word с извлеченным текстом)
 - TXT → DOCX (Простой текст в Word)
-- PDF → TXT (извлечение текста из PDF - базовое)
 
 ### Электронные таблицы
-- CSV → XLSX (CSV в Excel)
-- XLSX → CSV (Excel в CSV)
+- CSV ↔ XLSX (CSV ↔ Excel с полной Cyrillic поддержкой)
+- CSV → DOCX (CSV в Word таблицу)
+- XLSX → DOCX (Excel в Word таблицу)
 
 ### Изображения
-- PNG → JPG (без потерь в JPG с качеством 85%)
-- JPG → PNG (JPEG в PNG без потерь)
-- WEBP → PNG (WebP в PNG)
-- WEBP → JPG (WebP в JPEG)
-- JPG → PDF (JPEG изображение в PDF)
-- PNG → PDF (PNG изображение в PDF)
+- PNG ↔ JPG (преобразование с качеством 85%)
+- JPG ↔ PNG (обратное преобразование)
+- JPG ↔ WEBP (преобразование в WebP)
+- PNG ↔ WEBP (преобразование из WebP)
+- PNG/JPG → PDF (встраивание изображения в PDF)
 
 ### Веб-форматы
-- Markdown → HTML (Markdown в HTML с форматированием)
-- HTML → PDF (HTML в PDF)
+- Markdown ↔ HTML (двусторонняя конвертация)
+- HTML → PDF (HTML с форматированием в PDF)
+- TXT → HTML (простой текст в HTML с моноширинным шрифтом)
 
 ## Технологический стек
 
-- HTML5
+- HTML5 с UTF-8 кодировкой
 - CSS3 с CSS Grid и Flexbox
-- Vanilla JavaScript (ES6+)
-- JSZip 3.10.1 - для работы с архивами (ODT, DOCX)
-- Docx 8.5.0 - для создания документов DOCX
-- pdf-lib 1.17.1 - для создания и преобразования PDF файлов
-- PDF.js 3.11.174 - для чтения PDF документов
-- html2pdf.js 0.10.1 - для конвертации HTML в PDF
-- XLSX (SheetJS) 0.18.5 - для работы с электронными таблицами
-- Canvas API - для конвертации изображений
+- Vanilla JavaScript (ES6+, Promise/async-await)
+- JSZip 3.10.1 - работа с архивами (ODT, DOCX)
+- Docx 8.5.0 (UMD вариант) - создание документов DOCX с UTF-8
+- PDF.js 3.11.174 - чтение и извлечение текста из PDF
+- html2pdf.js 0.10.1 - конвертация HTML в PDF
+- XLSX (SheetJS) 0.18.5 - работа с электронными таблицами и CSV
+- Canvas API - преобразование изображений с Canvas.toBlob()
+- DOM Parser - парсинг XML в ODT/DOCX файлах
 
 ## Как это работает
 
@@ -104,22 +107,37 @@
 - `validateFileFormat(file)` - проверка совместимости файла с выбранным типом
 
 **Конвертация документов:**
-- `convertOdtToDocx(file)` - конвертация ODT в DOCX с улучшенной обработкой
-- `convertDocxToPdf(file)` - конвертация DOCX в PDF
+- `convertOdtToDocx(file)` - конвертация ODT в DOCX с рекурсивной обработкой текстовых элементов
+- `convertDocxToOdt(file)` - конвертация DOCX в ODT (прямое копирование ZIP)
+- `convertDocxToPdf(file)` - конвертация DOCX в PDF с UTF-8 Cyrillic поддержкой
+- `convertDocxToTxt(file)` - извлечение текста из DOCX
 - `convertTxtToDocx(file)` - преобразование простого текста в DOCX
+- `convertPdfToTxt(file)` - извлечение текста из PDF через PDF.js
+- `convertPdfToDocx(file)` - конвертация PDF в DOCX с сохранением структуры текста
 - `convertMarkdownToHtml(file)` - преобразование Markdown в HTML
+- `convertHtmlToMarkdown(file)` - преобразование HTML в Markdown
+- `convertHtmlToPdf(file)` - конвертация HTML в PDF
+- `convertTxtToHtml(file)` - преобразование простого текста в HTML
 
-**Конвертация таблиц:**
-- `convertCsvToXlsx(file)` - преобразование CSV в Excel
-- `convertXlsxToCsv(file)` - преобразование Excel в CSV
+**Конвертация таблиц (с Cyrillic поддержкой):**
+- `convertCsvToXlsx(file)` - преобразование CSV в Excel с правильным парсингом кавычек
+- `convertXlsxToCsv(file)` - преобразование Excel в CSV с экранированием спецсимволов
+- `convertCsvToDocx(file)` - преобразование CSV в Word таблицу
+- `convertXlsxToDocx(file)` - преобразование Excel в Word таблицу
 
 **Конвертация изображений:**
-- `convertImageFormat(file, targetFormat)` - универсальная функция для конвертации изображений через Canvas API
+- `convertImageFormat(file, targetFormat)` - универсальная функция для конвертации PNG/JPG/WEBP через Canvas API
+- `convertImageToPdf(file, imageType)` - встраивание изображения в PDF документ
 
 **Работа с файлами:**
 - `handleFile(file)` - валидирует и обрабатывает выбранный файл
 - `resetFileSelection()` - очищает текущий файл и состояние UI
 - `updateFileInfoUI(file)` - отображает название и размер файла
+- `validateFileFormat(file)` - проверка совместимости расширения файла
+
+**Управление библиотеками:**
+- `waitForLibraries(required)` - асинхронное ожидание загрузки библиотек (25 попыток, 250ms между попытками)
+- `checkLibraries()` - диагностика статуса всех загруженных библиотек
 
 **Конвертация:**
 - `startConversion(file)` - инициирует процесс конвертации по типу
@@ -151,10 +169,11 @@
 ## Ограничения и особенности
 
 ### Документы
-- ODT в DOCX: извлекает текст с улучшенной обработкой параграфов
-- DOCX в PDF: использует pdf-lib для корректного создания PDF (без встроенного форматирования для простоты)
-- Сложное форматирование требует серверной обработки для полной поддержки
-- PDF в TXT: требует серверной обработки для извлечения текста
+- ODT → DOCX: извлекает текст с рекурсивной обработкой параграфов и span элементов
+- DOCX → PDF: конвертирует текст в DOM элементы, использует html2pdf.js для PDF (без сложного форматирования)
+- PDF → TXT: полностью клиентская обработка через PDF.js, извлекает текст со всех страниц
+- PDF → DOCX: структурирует извлеченный текст в абзацы Word
+- Сложное форматирование (таблицы, колонки) может потерять структуру при конвертации
 
 ### Изображения
 - Конвертация изображений работает через Canvas API
@@ -164,14 +183,18 @@
 - Поддержка встраивания PNG и JPG в PDF
 
 ### Таблицы
-- CSV парсится по запятым (не поддерживает сложные разделители)
+- CSV парсится с поддержкой экранированных кавычек (RFC 4180 базовый уровень)
 - XLSX конвертирует только первый лист
+- CSV ↔ XLSX операции полностью поддерживают Cyrillic кодировку (UTF-8)
+- Специальные символы (запятая, кавычка, перевод строки) автоматически экранируются при экспорте в CSV
 
 ### Общее
-- Большие файлы (>50MB) могут запросить больше памяти браузера
-- Обработка происходит в основном потоке браузера
-- PDF с изображениями встраиваются корректно
+- Большие файлы (>50MB) могут требовать значительную память браузера
+- Обработка происходит в основном потоке браузера (асинхронно через async/await)
+- PDF.js worker загружается асинхронно из CDN для обработки многостраничных документов
 - Поддержка локального сохранения без загрузки на сервер
+- Все операции сохраняют UTF-8 кодировку, включая Cyrillic символы
+- Автоматическое экранирование HTML при необходимости
 
 ## Использование
 
@@ -198,20 +221,34 @@
 
 ## Внешние зависимости
 
-Библиотеки загружаются из CDN (cdnjs):
-- https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
-- https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/index.umd.min.js
-- https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js
-- https://cdnjs.cloudflare.com/ajax/libs/pdfjs-dist/3.11.174/pdf.min.js
-- https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js
-- https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
+Библиотеки загружаются из CDN:
+- **JSZip 3.10.1**: https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
+- **Docx 8.5.0 (UMD)**: https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js
+- **PDF.js 3.11.174**: https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js
+- **PDF.js Worker**: https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js
+- **html2pdf.js 0.10.1**: https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js
+- **XLSX 0.18.5**: https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 
-## Новые возможности
+**Примечание:** Docx загружается из jsdelivr в виде UMD модуля для совместимости, остальные библиотеки используют cdnjs.
 
-- Полная поддержка конвертации изображений в PDF (JPG и PNG)
-- Улучшенная функция конвертации DOCX в PDF с использованием pdf-lib
-- Надежная работа с разными форматами без потери данных
-- Поддержка встраивания изображений в PDF документы
+## Недавние улучшения (v2.0)
+
+### PDF обработка
+- ✅ Добавлена полная поддержка PDF → TXT через PDF.js
+- ✅ Добавлена поддержка PDF → DOCX с сохранением структуры текста
+- ✅ Асинхронная обработка многостраничных PDF файлов
+- ✅ Надежное управление PDF.js worker для обработки
+
+### Cyrillic и кодировка
+- ✅ Исправлена полная поддержка Cyrillic в XLSX ↔ CSV конвертациях
+- ✅ Правильный парсинг CSV с экранированными кавычками
+- ✅ Явное указание UTF-8 кодировки во всех текстовых операциях
+- ✅ Исправлена конвертация DOCX → PDF с полной Cyrillic поддержкой
+
+### Остальное
+- ✅ Полная поддержка конвертации изображений в PDF (JPG, PNG, WEBP)
+- ✅ Улучшенная обработка ошибок с диагностикой библиотек
+- ✅ Оптимизированная загрузка CDN ресурсов с повторными попытками
 
 ## Стилизация
 
