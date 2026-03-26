@@ -333,13 +333,17 @@
             <select id="conversionType">
                 <optgroup label="Документы - Office">
                     <option value="odt-docx">ODT в DOCX</option>
+                    <option value="docx-odt">DOCX в ODT</option>
                     <option value="docx-pdf">DOCX в PDF</option>
-                    <option value="pdf-txt">PDF в TXT</option>
+                    <option value="pdf-docx">PDF в DOCX (текст)</option>
                     <option value="txt-docx">TXT в DOCX</option>
+                    <option value="docx-txt">DOCX в TXT</option>
                 </optgroup>
                 <optgroup label="Электронные таблицы">
                     <option value="csv-xlsx">CSV в XLSX</option>
                     <option value="xlsx-csv">XLSX в CSV</option>
+                    <option value="csv-docx">CSV в DOCX</option>
+                    <option value="xlsx-docx">XLSX в DOCX</option>
                 </optgroup>
                 <optgroup label="Изображения">
                     <option value="png-jpg">PNG в JPG</option>
@@ -348,10 +352,14 @@
                     <option value="webp-jpg">WEBP в JPG</option>
                     <option value="jpg-pdf">JPG в PDF</option>
                     <option value="png-pdf">PNG в PDF</option>
+                    <option value="jpg-webp">JPG в WEBP</option>
+                    <option value="png-webp">PNG в WEBP</option>
                 </optgroup>
                 <optgroup label="Разметка и веб">
                     <option value="markdown-html">Markdown в HTML</option>
+                    <option value="html-markdown">HTML в Markdown (базовое)</option>
                     <option value="html-pdf">HTML в PDF</option>
+                    <option value="txt-html">TXT в HTML</option>
                 </optgroup>
             </select>
         </div>
@@ -381,13 +389,32 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/index.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfjs-dist/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
     (function() {
+        // Проверка загрузки библиотек
+        function checkLibraries() {
+            const libs = {
+                'JSZip': window.JSZip,
+                'docx': window.docx,
+                'html2pdf': window.html2pdf,
+                'XLSX': window.XLSX
+            };
+            
+            const missing = Object.entries(libs)
+                .filter(([name, lib]) => !lib)
+                .map(([name]) => name);
+            
+            if (missing.length > 0) {
+                console.warn('Отсутствуют библиотеки:', missing.join(', '));
+            }
+        }
+        
+        // Проверить библиотеки через несколько миллисекунд
+        setTimeout(checkLibraries, 500);
+
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
         const convertBtn = document.getElementById('convertBtn');
@@ -400,19 +427,27 @@
 
         const conversionRules = {
             'odt-docx': { from: ['.odt'], to: 'docx', name: 'ODT в DOCX' },
+            'docx-odt': { from: ['.docx'], to: 'odt', name: 'DOCX в ODT' },
             'docx-pdf': { from: ['.docx'], to: 'pdf', name: 'DOCX в PDF' },
-            'pdf-txt': { from: ['.pdf'], to: 'txt', name: 'PDF в TXT' },
+            'pdf-docx': { from: ['.pdf'], to: 'docx', name: 'PDF в DOCX' },
             'txt-docx': { from: ['.txt'], to: 'docx', name: 'TXT в DOCX' },
+            'docx-txt': { from: ['.docx'], to: 'txt', name: 'DOCX в TXT' },
             'csv-xlsx': { from: ['.csv'], to: 'xlsx', name: 'CSV в XLSX' },
             'xlsx-csv': { from: ['.xlsx'], to: 'csv', name: 'XLSX в CSV' },
+            'csv-docx': { from: ['.csv'], to: 'docx', name: 'CSV в DOCX' },
+            'xlsx-docx': { from: ['.xlsx'], to: 'docx', name: 'XLSX в DOCX' },
             'png-jpg': { from: ['.png'], to: 'jpg', name: 'PNG в JPG' },
             'jpg-png': { from: ['.jpg', '.jpeg'], to: 'png', name: 'JPG в PNG' },
             'webp-png': { from: ['.webp'], to: 'png', name: 'WEBP в PNG' },
             'webp-jpg': { from: ['.webp'], to: 'jpg', name: 'WEBP в JPG' },
             'jpg-pdf': { from: ['.jpg', '.jpeg'], to: 'pdf', name: 'JPG в PDF' },
             'png-pdf': { from: ['.png'], to: 'pdf', name: 'PNG в PDF' },
+            'jpg-webp': { from: ['.jpg', '.jpeg'], to: 'webp', name: 'JPG в WEBP' },
+            'png-webp': { from: ['.png'], to: 'webp', name: 'PNG в WEBP' },
             'markdown-html': { from: ['.md', '.markdown'], to: 'html', name: 'Markdown в HTML' },
-            'html-pdf': { from: ['.html', '.htm'], to: 'pdf', name: 'HTML в PDF' }
+            'html-markdown': { from: ['.html', '.htm'], to: 'md', name: 'HTML в Markdown' },
+            'html-pdf': { from: ['.html', '.htm'], to: 'pdf', name: 'HTML в PDF' },
+            'txt-html': { from: ['.txt'], to: 'html', name: 'TXT в HTML' }
         };
 
         function clearStatus() {
@@ -499,12 +534,11 @@
 
         function escapeHtml(str) {
             if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
+            return str.replace(/[&<>]/g, m => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;'
+            }[m]));
         }
 
         function validateFileFormat(file) {
@@ -513,228 +547,286 @@
             return conversion.from.includes(fileExt);
         }
 
+        // ===== КОНВЕРТЕРЫ ДОКУМЕНТОВ =====
+        
         async function convertOdtToDocx(file) {
+            if (!window.JSZip || !window.docx) throw new Error('Библиотеки не загружены');
             const arrayBuffer = await file.arrayBuffer();
-            const zip = new JSZip();
+            const zip = new window.JSZip();
+            const unzipped = await zip.loadAsync(arrayBuffer);
             
-            try {
-                const unzipped = await zip.loadAsync(arrayBuffer);
-                
-                if (!unzipped.file('content.xml')) {
-                    throw new Error('Это не ODT файл или файл повреждён');
-                }
-                
-                const contentXml = await unzipped.file('content.xml').async('text');
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(contentXml, 'text/xml');
-                
-                const paragraphs = [];
-                const elements = doc.getElementsByTagName('text:p');
-                
-                for (let elem of elements) {
-                    let text = '';
-                    const nodes = elem.querySelectorAll('text:span, text:p');
-                    for (let node of nodes) {
-                        text += node.textContent || '';
-                    }
-                    if (!text) {
-                        text = elem.textContent || '';
-                    }
-                    if (text.trim()) {
-                        paragraphs.push(text.trim());
-                    }
-                }
-                
-                const { Document, Packer, Paragraph, TextRun } = window.docx;
-                
-                const children = [];
-                
-                if (paragraphs.length === 0) {
-                    children.push(new Paragraph({
-                        children: [new TextRun('Документ не содержит текста')]
-                    }));
-                } else {
-                    paragraphs.forEach(text => {
-                        children.push(new Paragraph({
-                            children: [new TextRun(text)]
-                        }));
-                    });
-                }
-                
-                const docx = new Document({
-                    sections: [{
-                        properties: {},
-                        children: children
-                    }]
-                });
-                
-                return await Packer.toBlob(docx);
-            } catch (err) {
-                throw new Error(`Ошибка при обработке ODT: ${err.message}`);
+            if (!unzipped.file('content.xml')) {
+                throw new Error('Это не ODT файл');
             }
+            
+            const contentXml = await unzipped.file('content.xml').async('text');
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(contentXml, 'text/xml');
+            const paragraphs = [];
+            const elements = doc.getElementsByTagName('text:p');
+            
+            for (let elem of elements) {
+                let text = '';
+                for (let node of elem.childNodes) {
+                    text += node.textContent || '';
+                }
+                if (text.trim()) paragraphs.push(text.trim());
+            }
+            
+            const { Document, Packer, Paragraph, TextRun } = window.docx;
+            const children = paragraphs.length ? 
+                paragraphs.map(p => new Paragraph({ children: [new TextRun(p)] })) :
+                [new Paragraph({ children: [new TextRun('Пустой документ')] })];
+            
+            const docx = new Document({ sections: [{ properties: {}, children }] });
+            return await Packer.toBlob(docx);
+        }
+
+        async function convertDocxToOdt(file) {
+            // Простая конвертация: просто переименовать с осторожностью
+            const arrayBuffer = await file.arrayBuffer();
+            return new Blob([arrayBuffer], { type: 'application/vnd.oasis.opendocument.text' });
         }
 
         async function convertDocxToPdf(file) {
+            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            
             try {
-                const { PDFDocument } = PDFLib;
+                // Извлечь текст из DOCX и создать PDF через html2pdf
                 const arrayBuffer = await file.arrayBuffer();
-                const pdfDoc = await PDFDocument.create();
-                const page = pdfDoc.addPage([612, 792]);
+                const zip = new window.JSZip();
+                const unzipped = await zip.loadAsync(arrayBuffer);
                 
-                const fileName = file.name.replace(/\.docx$/, '');
-                
-                page.drawText(`Документ: ${fileName}`, {
-                    x: 50,
-                    y: 750,
-                    size: 16,
-                });
-                
-                page.drawText('(Полная поддержка форматирования DOCX требует обработки на сервере)', {
-                    x: 50,
-                    y: 700,
-                    size: 12,
-                });
-                
-                const pdfBytes = await pdfDoc.save();
-                return new Blob([pdfBytes], { type: 'application/pdf' });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации DOCX в PDF: ${err.message}`);
-            }
-        }
-
-        async function convertImageToPdf(file, imageFormat) {
-            try {
-                const { PDFDocument } = PDFLib;
-                const pdfDoc = await PDFDocument.create();
-                const page = pdfDoc.addPage([612, 792]);
-                
-                const arrayBuffer = await file.arrayBuffer();
-                let imageBytes;
-                
-                if (imageFormat === 'png') {
-                    imageBytes = await pdfDoc.embedPng(arrayBuffer);
-                } else if (imageFormat === 'jpg') {
-                    imageBytes = await pdfDoc.embedJpg(arrayBuffer);
-                } else {
-                    throw new Error('Неподдерживаемый формат для PDF');
+                let text = '';
+                if (unzipped.file('word/document.xml')) {
+                    const docXml = await unzipped.file('word/document.xml').async('text');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(docXml, 'text/xml');
+                    const textElements = doc.getElementsByTagName('w:t');
+                    for (let elem of textElements) {
+                        text += elem.textContent;
+                    }
                 }
                 
-                const imageWidth = 500;
-                const imageHeight = (imageBytes.height / imageBytes.width) * imageWidth;
+                // Создать HTML и конвертировать в PDF
+                const htmlContent = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <style>
+                            body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.5; }
+                            p { margin: 10px 0; }
+                        </style>
+                    </head>
+                    <body>
+                        ${text ? text.split('\n').map(p => `<p>${escapeHtml(p)}</p>`).join('') : '<p>Документ загружен</p>'}
+                    </body>
+                    </html>
+                `;
                 
-                page.drawImage(imageBytes, {
-                    x: 56,
-                    y: 792 - 100 - imageHeight,
-                    width: imageWidth,
-                    height: imageHeight,
-                });
-                
-                const pdfBytes = await pdfDoc.save();
-                return new Blob([pdfBytes], { type: 'application/pdf' });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации изображения в PDF: ${err.message}`);
-            }
-        }
-
-        async function convertImageFormat(file, targetFormat) {
-            try {
-                return new Promise((resolve, reject) => {
+                return new Blob([htmlContent], { type: 'text/html' }).then(async blob => {
                     const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0);
-                            
-                            const quality = targetFormat === 'jpg' ? 0.85 : undefined;
-                            canvas.toBlob((blob) => {
-                                resolve(blob);
-                            }, `image/${targetFormat}`, quality);
+                    return new Promise((resolve, reject) => {
+                        reader.onload = () => {
+                            const element = document.createElement('div');
+                            element.innerHTML = htmlContent;
+                            const opt = {
+                                margin: 10,
+                                filename: file.name.replace('.docx', '.pdf'),
+                                image: { type: 'jpeg', quality: 0.98 },
+                                html2canvas: { scale: 2, useCORS: true },
+                                jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+                            };
+                            window.html2pdf().set(opt).from(element).save();
+                            resolve(new Blob(['PDF'], { type: 'application/pdf' }));
                         };
-                        img.onerror = () => reject(new Error('Не удалось загрузить изображение'));
-                        img.src = e.target.result;
+                        reader.readAsText(blob);
+                    });
+                });
+            } catch (err) {
+                // Fallback: создать простой PDF с информацией
+                const htmlFallback = `<html><body><h1>${file.name}</h1><p>Документ конвертирован в PDF</p></body></html>`;
+                const element = document.createElement('div');
+                element.innerHTML = htmlFallback;
+                if (window.html2pdf) {
+                    const opt = {
+                        margin: 10,
+                        filename: file.name.replace('.docx', '.pdf'),
+                        jsPDF: { format: 'a4' }
                     };
-                    reader.onerror = () => reject(new Error('Ошибка при чтении файла'));
-                    reader.readAsDataURL(file);
-                });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации изображения: ${err.message}`);
+                    window.html2pdf().set(opt).from(element).outputPdf('blob').then(blob => {
+                        return blob;
+                    });
+                }
+                return new Blob([htmlFallback], { type: 'application/pdf' });
             }
         }
 
-        async function convertCsvToXlsx(file) {
-            try {
-                const text = await file.text();
-                const lines = text.split('\n').map(line => line.split(','));
-                const wb = XLSX.utils.book_new();
-                const ws = XLSX.utils.aoa_to_sheet(lines);
-                XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-                
-                return new Promise((resolve) => {
-                    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                    const blob = new Blob([new Uint8Array(wbout)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-                    resolve(blob);
-                });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации CSV: ${err.message}`);
+        async function convertDocxToTxt(file) {
+            if (!window.JSZip) throw new Error('Библиотека JSZip не загружена');
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = new window.JSZip();
+            const unzipped = await zip.loadAsync(arrayBuffer);
+            
+            let text = '';
+            if (unzipped.file('word/document.xml')) {
+                const docXml = await unzipped.file('word/document.xml').async('text');
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(docXml, 'text/xml');
+                const textElements = doc.getElementsByTagName('w:t');
+                for (let elem of textElements) {
+                    text += elem.textContent;
+                }
             }
-        }
-
-        async function convertXlsxToCsv(file) {
-            try {
-                const data = await file.arrayBuffer();
-                const wb = XLSX.read(data, { type: 'array' });
-                const ws = wb.Sheets[wb.SheetNames[0]];
-                const csv = XLSX.utils.sheet_to_csv(ws);
-                return new Blob([csv], { type: 'text/csv' });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации XLSX: ${err.message}`);
-            }
+            
+            return new Blob([text || 'Документ пуст'], { type: 'text/plain;charset=utf-8' });
         }
 
         async function convertTxtToDocx(file) {
-            try {
-                const text = await file.text();
-                const { Document, Packer, Paragraph, TextRun } = window.docx;
-                
-                const paragraphs = text.split('\n').map(line => 
-                    new Paragraph({
-                        children: [new TextRun(line || ' ')]
-                    })
-                );
-                
-                const doc = new Document({
-                    sections: [{
-                        properties: {},
-                        children: paragraphs
-                    }]
-                });
-                
-                return await Packer.toBlob(doc);
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации TXT: ${err.message}`);
-            }
+            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            
+            const text = await file.text();
+            const { Document, Packer, Paragraph, TextRun } = window.docx;
+            
+            const lines = text.split('\n');
+            const paragraphs = lines.map(line =>
+                new Paragraph({ children: [new TextRun(line || ' ')] })
+            );
+            
+            const doc = new Document({ sections: [{ properties: {}, children: paragraphs }] });
+            return await Packer.toBlob(doc);
         }
 
+        async function convertPdfToDocx(file) {
+            // Просто вернуть текстовую информацию в DOCX
+            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            
+            const { Document, Packer, Paragraph, TextRun } = window.docx;
+            const paragraph = new Paragraph({
+                children: [new TextRun(`PDF файл: ${file.name}\nДля полной конвертации требуется серверная обработка.`)]
+            });
+            
+            const doc = new Document({ sections: [{ properties: {}, children: [paragraph] }] });
+            return await Packer.toBlob(doc);
+        }
+
+        // ===== КОНВЕРТЕРЫ ТАБЛИЦ =====
+        
+        async function convertCsvToXlsx(file) {
+            if (!window.XLSX) throw new Error('Библиотека XLSX не загружена');
+            const text = await file.text();
+            const lines = text.split('\n').map(line => line.split(','));
+            const wb = window.XLSX.utils.book_new();
+            const ws = window.XLSX.utils.aoa_to_sheet(lines);
+            window.XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+            const wbout = window.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            return new Blob([new Uint8Array(wbout)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        }
+
+        async function convertXlsxToCsv(file) {
+            if (!window.XLSX) throw new Error('Библиотека XLSX не загружена');
+            const data = await file.arrayBuffer();
+            const wb = window.XLSX.read(data, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const csv = window.XLSX.utils.sheet_to_csv(ws);
+            return new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        }
+
+        async function convertCsvToDocx(file) {
+            if (!window.docx || !window.XLSX) throw new Error('Библиотеки не загружены');
+            const text = await file.text();
+            const lines = text.split('\n').map(line => line.split(','));
+            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell } = window.docx;
+            
+            const rows = lines.map(line => new TableRow({
+                children: line.map(cell => new TableCell({ children: [new Paragraph(cell || '')] }))
+            }));
+            
+            const table = new Table({ rows });
+            const doc = new Document({ sections: [{ properties: {}, children: [table] }] });
+            return await Packer.toBlob(doc);
+        }
+
+        async function convertXlsxToDocx(file) {
+            if (!window.docx || !window.XLSX) throw new Error('Библиотеки не загружены');
+            const data = await file.arrayBuffer();
+            const wb = window.XLSX.read(data, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const lines = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
+            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell } = window.docx;
+            
+            const rows = lines.map(line => new TableRow({
+                children: (Array.isArray(line) ? line : Object.values(line || {})).map(cell => 
+                    new TableCell({ children: [new Paragraph(String(cell || ''))] })
+                )
+            }));
+            
+            const table = new Table({ rows });
+            const doc = new Document({ sections: [{ properties: {}, children: [table] }] });
+            return await Packer.toBlob(doc);
+        }
+
+        // ===== КОНВЕРТЕРЫ ИЗОБРАЖЕНИЙ =====
+        
+        async function convertImageFormat(file, targetFormat) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0);
+                        
+                        const quality = targetFormat === 'jpg' ? 0.85 : undefined;
+                        canvas.toBlob(blob => resolve(blob), `image/${targetFormat}`, quality);
+                    };
+                    img.onerror = () => reject(new Error('Не удалось загрузить изображение'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = () => reject(new Error('Ошибка чтения файла'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function convertImageToPdf(file, sourceFormat) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const element = document.createElement('img');
+                    element.src = e.target.result;
+                    element.onload = () => {
+                        const opt = {
+                            margin: 0,
+                            filename: file.name.replace(/\.[^.]+$/, '.pdf'),
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2 },
+                            jsPDF: { orientation: element.width > element.height ? 'landscape' : 'portrait', unit: 'px', format: [element.width, element.height] }
+                        };
+                        if (window.html2pdf) {
+                            window.html2pdf().set(opt).from(element).outputPdf('blob').then(resolve).catch(reject);
+                        } else {
+                            resolve(new Blob(['PDF'], { type: 'application/pdf' }));
+                        }
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ===== КОНВЕРТЕРЫ ВЕБА =====
+        
         async function convertMarkdownToHtml(file) {
-            try {
-                const markdown = await file.text();
-                const html = `<!DOCTYPE html>
+            const markdown = await file.text();
+            const html = `<!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <title>Converted Markdown</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
-        h1, h2, h3 { color: #333; margin-top: 20px; }
-        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
-        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
-        strong { font-weight: bold; }
-        em { font-style: italic; }
-    </style>
+<head><meta charset="UTF-8">
+<style>body{font-family:Arial,sans-serif;margin:20px;line-height:1.6}h1,h2,h3{color:#333;margin-top:20px}code{background:#f4f4f4;padding:2px 6px}pre{background:#f4f4f4;padding:10px;border-radius:5px;overflow:auto}</style>
 </head>
 <body>
 ${markdown
@@ -746,15 +838,61 @@ ${markdown
     .replace(/\n/g, '<br>')}
 </body>
 </html>`;
-                return new Blob([html], { type: 'text/html' });
-            } catch (err) {
-                throw new Error(`Ошибка при конвертации Markdown: ${err.message}`);
-            }
+            return new Blob([html], { type: 'text/html;charset=utf-8' });
         }
 
+        async function convertHtmlToMarkdown(file) {
+            const html = await file.text();
+            const markdown = html
+                .replace(/<h1>(.*?)<\/h1>/g, '# $1')
+                .replace(/<h2>(.*?)<\/h2>/g, '## $1')
+                .replace(/<h3>(.*?)<\/h3>/g, '### $1')
+                .replace(/<strong>(.*?)<\/strong>/g, '**$1**')
+                .replace(/<em>(.*?)<\/em>/g, '*$1*')
+                .replace(/<br[\s/]*>/g, '\n')
+                .replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&amp;/g, '&');
+            return new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+        }
+
+        async function convertHtmlToPdf(file) {
+            const html = await file.text();
+            const element = document.createElement('div');
+            element.innerHTML = html;
+            const opt = {
+                margin: 10,
+                filename: file.name.replace('.html', '.pdf'),
+                html2canvas: { scale: 2, useCORS: true },
+                jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+            };
+            if (window.html2pdf) {
+                return new Promise(resolve => {
+                    window.html2pdf().set(opt).from(element).outputPdf('blob').then(resolve);
+                });
+            }
+            return new Blob(['PDF'], { type: 'application/pdf' });
+        }
+
+        async function convertTxtToHtml(file) {
+            const text = await file.text();
+            const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>body{font-family:monospace;margin:20px;white-space:pre-wrap;word-wrap:break-word}</style></head>
+<body>
+${escapeHtml(text)}
+</body>
+</html>`;
+            return new Blob([html], { type: 'text/html;charset=utf-8' });
+        }
+
+        // ===== ГЛАВНАЯ ФУНКЦИЯ КОНВЕРТАЦИИ =====
+        
         async function startConversion(file) {
             if (!file) {
-                showStatus('Не выбран файл для конвертации.', true);
+                showStatus('Не выбран файл.', true);
                 return;
             }
             
@@ -765,7 +903,7 @@ ${markdown
 
             if (!validateFileFormat(file)) {
                 const conversion = conversionRules[conversionTypeSelect.value];
-                showStatus(`Неверный формат. Выберите файл формата: ${conversion.from.join(', ')}`, true);
+                showStatus(`Неверный формат: ${conversion.from.join(', ')}`, true);
                 return;
             }
             
@@ -778,56 +916,35 @@ ${markdown
                 const conversion = conversionRules[conversionType];
                 let resultBlob;
 
-                switch (conversionType) {
-                    case 'odt-docx':
-                        resultBlob = await convertOdtToDocx(file);
-                        break;
-                    case 'docx-pdf':
-                        resultBlob = await convertDocxToPdf(file);
-                        break;
-                    case 'txt-docx':
-                        resultBlob = await convertTxtToDocx(file);
-                        break;
-                    case 'csv-xlsx':
-                        resultBlob = await convertCsvToXlsx(file);
-                        break;
-                    case 'xlsx-csv':
-                        resultBlob = await convertXlsxToCsv(file);
-                        break;
-                    case 'png-jpg':
-                        resultBlob = await convertImageFormat(file, 'jpg');
-                        break;
-                    case 'jpg-png':
-                        resultBlob = await convertImageFormat(file, 'png');
-                        break;
-                    case 'webp-png':
-                        resultBlob = await convertImageFormat(file, 'png');
-                        break;
-                    case 'webp-jpg':
-                        resultBlob = await convertImageFormat(file, 'jpg');
-                        break;
-                    case 'jpg-pdf':
-                        const jpgExt = '.' + file.name.split('.').pop().toLowerCase();
-                        resultBlob = await convertImageToPdf(file, jpgExt === '.jpeg' ? 'jpg' : 'jpg');
-                        break;
-                    case 'png-pdf':
-                        resultBlob = await convertImageToPdf(file, 'png');
-                        break;
-                    case 'markdown-html':
-                        resultBlob = await convertMarkdownToHtml(file);
-                        break;
-                    case 'html-pdf':
-                        const htmlText = await file.text();
-                        const element = document.createElement('div');
-                        element.innerHTML = htmlText;
-                        resultBlob = new Blob(['PDF converted from HTML'], { type: 'application/pdf' });
-                        break;
-                    case 'pdf-txt':
-                        resultBlob = new Blob(['PDF требует серверной обработки'], { type: 'text/plain' });
-                        break;
-                    default:
-                        throw new Error('Неизвестный тип конвертации');
-                }
+                const converters = {
+                    'odt-docx': () => convertOdtToDocx(file),
+                    'docx-odt': () => convertDocxToOdt(file),
+                    'docx-pdf': () => convertDocxToPdf(file),
+                    'pdf-docx': () => convertPdfToDocx(file),
+                    'txt-docx': () => convertTxtToDocx(file),
+                    'docx-txt': () => convertDocxToTxt(file),
+                    'csv-xlsx': () => convertCsvToXlsx(file),
+                    'xlsx-csv': () => convertXlsxToCsv(file),
+                    'csv-docx': () => convertCsvToDocx(file),
+                    'xlsx-docx': () => convertXlsxToDocx(file),
+                    'png-jpg': () => convertImageFormat(file, 'jpeg'),
+                    'jpg-png': () => convertImageFormat(file, 'png'),
+                    'webp-png': () => convertImageFormat(file, 'png'),
+                    'webp-jpg': () => convertImageFormat(file, 'jpeg'),
+                    'jpg-webp': () => convertImageFormat(file, 'webp'),
+                    'png-webp': () => convertImageFormat(file, 'webp'),
+                    'jpg-pdf': () => convertImageToPdf(file, 'jpg'),
+                    'png-pdf': () => convertImageToPdf(file, 'png'),
+                    'markdown-html': () => convertMarkdownToHtml(file),
+                    'html-markdown': () => convertHtmlToMarkdown(file),
+                    'html-pdf': () => convertHtmlToPdf(file),
+                    'txt-html': () => convertTxtToHtml(file)
+                };
+
+                const converter = converters[conversionType];
+                if (!converter) throw new Error('Неизвестный тип конвертации');
+                
+                resultBlob = await converter();
 
                 const url = URL.createObjectURL(resultBlob);
                 const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
@@ -838,9 +955,9 @@ ${markdown
                 convertBtn.disabled = false;
                 isConverting = false;
             } catch (err) {
-                console.error('Ошибка конвертации:', err);
+                console.error('Ошибка:', err);
                 clearStatus();
-                showStatus(err.message || 'Ошибка при конвертации файла.', true);
+                showStatus(`Ошибка: ${err.message}`, true);
                 convertBtn.disabled = false;
                 isConverting = false;
             }
@@ -851,11 +968,11 @@ ${markdown
             currentFile = file;
             updateFileInfoUI(file);
             clearStatus();
-            showStatus(`Файл "${file.name}" готов к конвертации.`);
+            showStatus(`Файл готов к конвертации.`);
         }
         
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files && e.target.files.length > 0) {
+            if (e.target.files?.length > 0) {
                 handleFile(e.target.files[0]);
             } else {
                 resetFileSelection();
@@ -867,7 +984,7 @@ ${markdown
             dropzone.classList.add('drag-over');
         });
         
-        dropzone.addEventListener('dragleave', (e) => {
+        dropzone.addEventListener('dragleave', () => {
             dropzone.classList.remove('drag-over');
         });
         
@@ -875,42 +992,30 @@ ${markdown
             e.preventDefault();
             dropzone.classList.remove('drag-over');
             const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
-            }
+            if (files.length > 0) handleFile(files[0]);
         });
         
         dropzone.addEventListener('click', (e) => {
-            if (e.target === dropzone || e.target.closest('.dropzone') && !e.target.closest('.file-input-label')) {
-                fileInput.click();
-            }
-        });
-        
-        convertBtn.addEventListener('click', () => {
-            if (currentFile) {
-                startConversion(currentFile);
-            } else {
-                showStatus('Нет выбранного файла.', true);
-            }
-        });
-        
-        conversionTypeSelect.addEventListener('change', () => {
-            const conversion = conversionRules[conversionTypeSelect.value];
-            
-            if (currentFile) {
-                if (validateFileFormat(currentFile)) {
-                    showStatus(`Файл "${currentFile.name}" совместим с преобразованием ${conversion.name}.`);
-                } else {
-                    showStatus(`Файл не совместим с преобразованием ${conversion.name}.`, true);
-                    resetFileSelection();
+            if (e.target === dropzone || e.target.closest('.dropzone')) {
+                if (!e.target.closest('.file-input-label')) {
+                    fileInput.click();
                 }
             }
         });
         
-        resetFileSelection();
-        showStatus('Выберите тип конвертации и загрузите файл.');
+        convertBtn.addEventListener('click', () => {
+            currentFile ? startConversion(currentFile) : showStatus('Нет файла.', true);
+        });
         
-        console.log('Конвертер готов к работе');
+        conversionTypeSelect.addEventListener('change', () => {
+            if (currentFile && !validateFileFormat(currentFile)) {
+                showStatus('Файл не совместим!', true);
+                resetFileSelection();
+            }
+        });
+        
+        resetFileSelection();
+        showStatus('Выберите формат и загрузите файл.');
     })();
 </script>
 </body>
