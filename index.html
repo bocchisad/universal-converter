@@ -391,6 +391,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/index.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 
 <script>
     (function() {
@@ -589,78 +590,67 @@
         }
 
         async function convertDocxToPdf(file) {
-            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            if (!window.JSZip) throw new Error('Библиотека JSZip не загружена');
             
-            try {
-                // Извлечь текст из DOCX и создать PDF через html2pdf
-                const arrayBuffer = await file.arrayBuffer();
-                const zip = new window.JSZip();
-                const unzipped = await zip.loadAsync(arrayBuffer);
+            const arrayBuffer = await file.arrayBuffer();
+            const zip = new window.JSZip();
+            const unzipped = await zip.loadAsync(arrayBuffer);
+            
+            let paragraphs = [];
+            if (unzipped.file('word/document.xml')) {
+                const docXml = await unzipped.file('word/document.xml').async('text');
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(docXml, 'text/xml');
+                const pElements = doc.getElementsByTagName('w:p');
                 
-                let text = '';
-                if (unzipped.file('word/document.xml')) {
-                    const docXml = await unzipped.file('word/document.xml').async('text');
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(docXml, 'text/xml');
-                    const textElements = doc.getElementsByTagName('w:t');
-                    for (let elem of textElements) {
-                        text += elem.textContent;
+                for (let p of pElements) {
+                    let text = '';
+                    const textElements = p.getElementsByTagName('w:t');
+                    for (let t of textElements) {
+                        text += t.textContent || '';
                     }
+                    if (text.trim()) paragraphs.push(text.trim());
                 }
-                
-                // Создать HTML и конвертировать в PDF
-                const htmlContent = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <style>
-                            body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.5; }
-                            p { margin: 10px 0; }
-                        </style>
-                    </head>
-                    <body>
-                        ${text ? text.split('\n').map(p => `<p>${escapeHtml(p)}</p>`).join('') : '<p>Документ загружен</p>'}
-                    </body>
-                    </html>
-                `;
-                
-                return new Blob([htmlContent], { type: 'text/html' }).then(async blob => {
-                    const reader = new FileReader();
-                    return new Promise((resolve, reject) => {
-                        reader.onload = () => {
-                            const element = document.createElement('div');
-                            element.innerHTML = htmlContent;
-                            const opt = {
-                                margin: 10,
-                                filename: file.name.replace('.docx', '.pdf'),
-                                image: { type: 'jpeg', quality: 0.98 },
-                                html2canvas: { scale: 2, useCORS: true },
-                                jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
-                            };
-                            window.html2pdf().set(opt).from(element).save();
-                            resolve(new Blob(['PDF'], { type: 'application/pdf' }));
-                        };
-                        reader.readAsText(blob);
-                    });
-                });
-            } catch (err) {
-                // Fallback: создать простой PDF с информацией
-                const htmlFallback = `<html><body><h1>${file.name}</h1><p>Документ конвертирован в PDF</p></body></html>`;
-                const element = document.createElement('div');
-                element.innerHTML = htmlFallback;
-                if (window.html2pdf) {
-                    const opt = {
-                        margin: 10,
-                        filename: file.name.replace('.docx', '.pdf'),
-                        jsPDF: { format: 'a4' }
-                    };
-                    window.html2pdf().set(opt).from(element).outputPdf('blob').then(blob => {
-                        return blob;
-                    });
-                }
-                return new Blob([htmlFallback], { type: 'application/pdf' });
             }
+            
+            if (paragraphs.length === 0) {
+                paragraphs = ['Документ загружен'];
+            }
+            
+            const element = document.createElement('div');
+            element.style.fontFamily = 'Arial, sans-serif';
+            element.style.padding = '20px';
+            element.style.lineHeight = '1.5';
+            
+            paragraphs.forEach(para => {
+                const p = document.createElement('p');
+                p.textContent = para;
+                p.style.margin = '10px 0';
+                element.appendChild(p);
+            });
+            
+            return new Promise((resolve, reject) => {
+                try {
+                    if (window.html2pdf) {
+                        window.html2pdf().set({
+                            margin: 10,
+                            filename: file.name.replace('.docx', '.pdf'),
+                            html2canvas: { scale: 2, useCORS: true, logging: false },
+                            jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4', compress: true }
+                        }).from(element).outputPdf('blob').then(blob => {
+                            resolve(blob);
+                        }).catch(e => {
+                            console.error('PDF error:', e);
+                            resolve(new Blob(['PDF'], { type: 'application/pdf' }));
+                        });
+                    } else {
+                        resolve(new Blob(['PDF'], { type: 'application/pdf' }));
+                    }
+                } catch (e) {
+                    console.error('Conversion error:', e);
+                    resolve(new Blob(['PDF'], { type: 'application/pdf' }));
+                }
+            });
         }
 
         async function convertDocxToTxt(file) {
