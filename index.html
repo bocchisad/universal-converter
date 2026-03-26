@@ -564,14 +564,35 @@
             const parser = new DOMParser();
             const doc = parser.parseFromString(contentXml, 'text/xml');
             const paragraphs = [];
-            const elements = doc.getElementsByTagName('text:p');
             
-            for (let elem of elements) {
+            // Обработка всех элементов документа рекурсивно
+            function extractText(element) {
                 let text = '';
-                for (let node of elem.childNodes) {
-                    text += node.textContent || '';
+                if (element.nodeType === 3) { // Text node
+                    text = element.nodeValue || '';
+                } else if (element.nodeType === 1) { // Element node
+                    // Пропускаем элементы, которые не содержат текст
+                    if (['text:p', 'text:span', 'text:s', 'text:tab'].includes(element.tagName)) {
+                        for (let node of element.childNodes) {
+                            text += extractText(node);
+                        }
+                    }
                 }
-                if (text.trim()) paragraphs.push(text.trim());
+                return text;
+            }
+            
+            // Найти все абзацы используя namespace-aware метод
+            const allElements = doc.documentElement.getElementsByTagName('*');
+            for (let elem of allElements) {
+                if (elem.tagName === 'text:p') {
+                    let text = '';
+                    for (let node of elem.childNodes) {
+                        text += extractText(node);
+                    }
+                    if (text.trim()) {
+                        paragraphs.push(text.trim());
+                    }
+                }
             }
             
             const { Document, Packer, Paragraph, TextRun } = window.docx;
