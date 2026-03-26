@@ -416,6 +416,23 @@
         // Проверить библиотеки через несколько миллисекунд
         setTimeout(checkLibraries, 500);
 
+        // Функция ожидания загрузки библиотек с повторными попытками
+        async function waitForLibraries(required = []) {
+            const maxAttempts = 10;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                let allLoaded = true;
+                for (let libName of required) {
+                    if (!window[libName]) {
+                        allLoaded = false;
+                        break;
+                    }
+                }
+                if (allLoaded) return true;
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            throw new Error('Не удалось загрузить необходимые библиотеки. Обновите страницу и попробуйте снова.');
+        }
+
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
         const convertBtn = document.getElementById('convertBtn');
@@ -551,7 +568,7 @@
         // ===== КОНВЕРТЕРЫ ДОКУМЕНТОВ =====
         
         async function convertOdtToDocx(file) {
-            if (!window.JSZip || !window.docx) throw new Error('Библиотеки не загружены');
+            await waitForLibraries(['JSZip', 'docx']);
             const arrayBuffer = await file.arrayBuffer();
             const zip = new window.JSZip();
             const unzipped = await zip.loadAsync(arrayBuffer);
@@ -611,7 +628,7 @@
         }
 
         async function convertDocxToPdf(file) {
-            if (!window.JSZip) throw new Error('Библиотека JSZip не загружена');
+            await waitForLibraries(['JSZip', 'html2pdf']);
             
             const arrayBuffer = await file.arrayBuffer();
             const zip = new window.JSZip();
@@ -650,6 +667,17 @@
                 element.appendChild(p);
             });
             
+            // Добавить примечание о конвертации только текста
+            const note = document.createElement('div');
+            note.style.marginTop = '30px';
+            note.style.padding = '15px';
+            note.style.backgroundColor = '#f0f0f0';
+            note.style.borderLeft = '4px solid #666';
+            note.style.fontSize = '12px';
+            note.style.color = '#333';
+            note.textContent = 'Примечание: конвертирован только текстовый контент. Изображения, таблицы со сложным форматированием и другие элементы не включены в PDF.';
+            element.appendChild(note);
+            
             return new Promise((resolve, reject) => {
                 try {
                     if (window.html2pdf) {
@@ -675,7 +703,7 @@
         }
 
         async function convertDocxToTxt(file) {
-            if (!window.JSZip) throw new Error('Библиотека JSZip не загружена');
+            await waitForLibraries(['JSZip']);
             const arrayBuffer = await file.arrayBuffer();
             const zip = new window.JSZip();
             const unzipped = await zip.loadAsync(arrayBuffer);
@@ -695,7 +723,7 @@
         }
 
         async function convertTxtToDocx(file) {
-            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            await waitForLibraries(['docx']);
             
             const text = await file.text();
             const { Document, Packer, Paragraph, TextRun } = window.docx;
@@ -711,7 +739,7 @@
 
         async function convertPdfToDocx(file) {
             // Просто вернуть текстовую информацию в DOCX
-            if (!window.docx) throw new Error('Библиотека docx не загружена');
+            await waitForLibraries(['docx']);
             
             const { Document, Packer, Paragraph, TextRun } = window.docx;
             const paragraph = new Paragraph({
@@ -725,7 +753,7 @@
         // ===== КОНВЕРТЕРЫ ТАБЛИЦ =====
         
         async function convertCsvToXlsx(file) {
-            if (!window.XLSX) throw new Error('Библиотека XLSX не загружена');
+            await waitForLibraries(['XLSX']);
             const text = await file.text();
             const lines = text.split('\n').map(line => line.split(','));
             const wb = window.XLSX.utils.book_new();
@@ -736,7 +764,7 @@
         }
 
         async function convertXlsxToCsv(file) {
-            if (!window.XLSX) throw new Error('Библиотека XLSX не загружена');
+            await waitForLibraries(['XLSX']);
             const data = await file.arrayBuffer();
             const wb = window.XLSX.read(data, { type: 'array' });
             const ws = wb.Sheets[wb.SheetNames[0]];
@@ -745,7 +773,7 @@
         }
 
         async function convertCsvToDocx(file) {
-            if (!window.docx || !window.XLSX) throw new Error('Библиотеки не загружены');
+            await waitForLibraries(['docx', 'XLSX']);
             const text = await file.text();
             const lines = text.split('\n').map(line => line.split(','));
             const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell } = window.docx;
@@ -760,7 +788,7 @@
         }
 
         async function convertXlsxToDocx(file) {
-            if (!window.docx || !window.XLSX) throw new Error('Библиотеки не загружены');
+            await waitForLibraries(['docx', 'XLSX']);
             const data = await file.arrayBuffer();
             const wb = window.XLSX.read(data, { type: 'array' });
             const ws = wb.Sheets[wb.SheetNames[0]];
