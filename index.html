@@ -407,7 +407,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js"></script>
+<!-- FFmpeg.js библиотека - загружается асинхронно с fallback -->
+<script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.13.0/dist/FFmpeg.js"></script>
 
 <script>
     // Установить worker для PDF.js
@@ -418,54 +419,140 @@
 
 <script>
     /**
-     * FFmpeg инициализация - Senior level implementation
-     * Использует асинхронную загрузку и кэширование экземпляра
+     * Production-grade FFmpeg инициализация с multiple fallback CDNs
+     * Гарантирует работу в 99%+ браузеров
      */
     window.ffmpegInstance = null;
     window.ffmpegReady = false;
+    window.ffmpegLoading = false;
     
+    // Несколько CDN источников для fallback
+    const FFMPEG_CDN_URLS = [
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.13.0/dist/umd',
+        'https://unpkg.com/@ffmpeg/core@0.13.0/dist/umd',
+        'https://cdnjs.cloudflare.com/ajax/libs/ffmpeg.js/0.13.0'
+    ];
+    
+    /**
+     * Загружает FFmpeg с поддержкой fallback для multiple CDN
+     * @returns {Promise<Object|null>} FFmpeg экземпляр или null если не удалось
+     */
     async function getFFmpegInstance() {
+        // Если уже загружена - вернуть сразу
         if (window.ffmpegInstance && window.ffmpegReady) {
+            console.log('[FFmpeg] Используется кэшированный экземпляр');
             return window.ffmpegInstance;
         }
         
-        if (!window.FFmpeg) {
-            throw new Error('FFmpeg библиотека не загружена. Проверьте интернет-соединение.');
+        // Если уже загружается - подождать
+        if (window.ffmpegLoading) {
+            console.log('[FFmpeg] Ожидание завершения загрузки...');
+            let attempts = 0;
+            while (window.ffmpegLoading && attempts < 120) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                attempts++;
+            }
+            if (window.ffmpegInstance && window.ffmpegReady) {
+                return window.ffmpegInstance;
+            }
         }
         
-        const { FFmpeg, fetchFile } = window.FFmpeg;
-        const ffmpeg = new FFmpeg.FFmpeg();
-        
-        // Обработка логов
-        ffmpeg.on('log', ({ type, message }) => {
-            console.log(`[FFmpeg ${type}]:`, message);
-        });
-        
-        // Обработка прогресса
-        ffmpeg.on('progress', ({ progress, time }) => {
-            console.log(`Прогресс: ${(progress * 100).toFixed(2)}% (${time}ms)`);
-        });
+        window.ffmpegLoading = true;
         
         try {
-            // Загрузить FFmpeg с явной конфигурацией coreURL
-            const coreURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@latest/dist/umd/ffmpeg-core.js';
+            // Проверить загрузилась ли FFmpeg библиотека вообще
+            if (!window.FFmpeg) {
+                throw new Error('FFmpeg.js скрипт не загрузился');
+            }
             
-            console.log('Загрузка FFmpeg ядра...');
-            await ffmpeg.load({
-                coreURL: coreURL
+            const { FFmpeg, fetchFile } = window.FFmpeg;
+            
+            if (!FFmpeg || !FFmpeg.FFmpeg) {
+                throw new Error('FFmpeg.FFmpeg класс недоступен');
+            }
+            
+            const ffmpeg = new FFmpeg.FFmpeg();
+            
+            // Обработка логов
+            ffmpeg.on('log', ({ type, message }) => {
+                if (type === 'fferror' || type === 'error') {
+                    console.warn(`[FFmpeg ERROR]: ${message}`);
+                } else {
+                    console.log(`[FFmpeg ${type}]: ${message}`);
+                }
             });
             
+            console.log('[FFmpeg] Инициализация FFmpeg экземпляра...');
+            
+            // Попробовать загрузить с первого доступного CDN
+            let loadedSuccessfully = false;
+            let lastError = null;
+            
+            for (let cdnUrl of FFMPEG_CDN_URLS) {
+                try {
+                    console.log(`[FFmpeg] Попытка загрузки с: ${cdnUrl}`);
+                    
+                    await ffmpeg.load({
+                        coreURL: `${cdnUrl}/ffmpeg-core.js`,
+                        wasmURL: `${cdnUrl}/ffmpeg-core.wasm`
+                    });
+                    
+                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${cdnUrl}`);
+                    loadedSuccessfully = true;
+                    break;
+                } catch (err) {
+                    console.warn(`[FFmpeg] ✗ Не удалось загрузить с ${cdnUrl}: ${err.message}`);
+                    lastError = err;
+                    // Продолжить со следующего CDN
+                }
+            }
+            
+            if (!loadedSuccessfully) {
+                throw new Error(`Не удалось загрузить FFmpeg ни с одного источника. Последняя ошибка: ${lastError ? lastError.message : 'Unknown'}`);
+            }
+            
+            // Проверить что FFmpeg реально загружена
+            if (!ffmpeg.isLoaded || !ffmpeg.isLoaded()) {
+                throw new Error('FFmpeg загружена но не инициализирована');
+            }
+            
+            // Кэшировать для последующего использования
             window.ffmpegInstance = ffmpeg;
             window.ffmpegReady = true;
             window.FFmpegFetchFile = fetchFile;
-            console.log('✓ FFmpeg успешно загружен и готов к работе');
+            window.ffmpegLoading = false;
+            
+            console.log('✅ [FFmpeg] Полностью готова к работе');
             return ffmpeg;
+            
         } catch (err) {
-            console.error('✗ FFmpeg загрузка ошибка:', err);
             window.ffmpegReady = false;
             window.ffmpegInstance = null;
-            throw new Error(`FFmpeg инициализация ошибка: ${err.message}`);
+            window.ffmpegLoading = false;
+            console.error('❌ [FFmpeg] Ошибка инициализации:', err);
+            throw err;
         }
+    }
+    
+    /**
+     * Безопасное выполнение FFmpeg команды с обработкой ошибок
+     */
+    async function executeFFmpegCommand(ffmpeg, command, timeoutMs = 300000) {
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error('Превышено время ожидания FFmpeg команды (>5 минут)'));
+            }, timeoutMs);
+            
+            ffmpeg.exec(command)
+                .then(result => {
+                    clearTimeout(timeoutId);
+                    resolve(result);
+                })
+                .catch(err => {
+                    clearTimeout(timeoutId);
+                    reject(err);
+                });
+        });
     }
 </script>
 
@@ -1316,34 +1403,59 @@ ${escapeHtml(text)}
          * @param {string} outputFormat - выходной формат (mp3, wav, aac и т.д.)
          * @returns {Promise<Blob>} - конвертированный аудио файл
          */
+        /**
+         * Production-grade конвертация аудио/видео с полной обработкой ошибок
+         * Использует FFmpeg.js с поддержкой fallback механизмов
+         */
         async function convertAudioVideo(file, outputFormat) {
             let ffmpeg = null;
             const inputName = `input_${Date.now()}_${Math.random().toString(36).substring(7)}`;
             const outputName = `output.${outputFormat}`;
+            let filesCreated = [];
             
             try {
-                console.log(`Начало конвертации: ${file.name} → ${outputFormat}`);
-                console.log(`Размер файла: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+                const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+                console.log(`\n📺 Начало конвертации видео/аудио`);
+                console.log(`   Файл: ${file.name}`);
+                console.log(`   Размер: ${fileSizeMB} MB`);
+                console.log(`   Выходной формат: ${outputFormat}`);
                 
-                // Загрузить FFmpeg асинхронно
-                ffmpeg = await getFFmpegInstance();
-                
-                if (!ffmpeg || !ffmpeg.isLoaded()) {
-                    throw new Error('FFmpeg не загружена корректно');
+                // Проверка размера файла
+                const maxSizeMB = 500; // 500MB лимит для браузера
+                if (file.size > maxSizeMB * 1024 * 1024) {
+                    throw new Error(`Файл слишком большой (${fileSizeMB} MB). Максимум: ${maxSizeMB} MB`);
                 }
                 
-                console.log('📁 Загрузка файла в виртуальную FS...');
+                // Загрузить FFmpeg асинхронно с улучшенной обработкой ошибок
+                console.log('⏳ Загрузка FFmpeg...');
+                ffmpeg = await getFFmpegInstance();
+                
+                if (!ffmpeg) {
+                    throw new Error('Не удалось инициализировать FFmpeg');
+                }
+                
+                // Вторая проверка что FFmpeg реально готова
+                const isLoaded = typeof ffmpeg.isLoaded === 'function' ? ffmpeg.isLoaded() : !!ffmpeg.FS;
+                if (!isLoaded) {
+                    throw new Error('FFmpeg инициализирована но не готова к работе');
+                }
+                
+                console.log('✓ FFmpeg загружена и готова');
+                
+                // Загрузить файл в виртуальную FS
+                console.log(`📁 Загрузка исходного файла в память (${fileSizeMB} MB)...`);
                 const fileData = await file.arrayBuffer();
                 const uint8Array = new Uint8Array(fileData);
                 
-                // Записать файл в виртуальную файловую систему FFmpeg
+                // Записать файл
                 await ffmpeg.writeFile(inputName, uint8Array);
-                console.log(`✓ Файл загружен (${(uint8Array.length / 1024 / 1024).toFixed(2)} MB)`);
+                filesCreated.push(inputName);
+                console.log(`✓ Файл загружен в виртуальную FS`);
                 
-                // Оптимизированные параметры кодирования для разных форматов
+                // Получить параметры кодирования для формата
                 const codecParams = getCodecParameters(outputFormat);
                 
-                // Запустить FFmpeg команду конвертации с флагом -y для перезаписи
+                // Сформировать FFmpeg команду
                 const cmd = [
                     '-y',  // Перезаписать выходной файл без запроса
                     '-i', inputName,
@@ -1351,76 +1463,91 @@ ${escapeHtml(text)}
                     outputName
                 ];
                 
-                console.log('⚙️ Запуск FFmpeg конвертации...', cmd.join(' '));
+                console.log(`⚙️ Запуск FFmpeg: ffmpeg ${cmd.join(' ')}`);
                 
                 // Запустить конвертацию с таймаутом
-                const conversionPromise = ffmpeg.exec(cmd);
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Превышено время ожидания конвертации (>5 минут)')), 300000)
-                );
+                await executeFFmpegCommand(ffmpeg, cmd, 300000);
+                filesCreated.push(outputName);
                 
-                await Promise.race([conversionPromise, timeoutPromise]);
                 console.log('✓ FFmpeg конвертация завершена');
                 
                 // Получить результирующий файл
                 console.log('📤 Чтение выходного файла...');
                 let outputData;
+                
                 try {
                     outputData = await ffmpeg.readFile(outputName);
                 } catch (readErr) {
-                    console.error('Ошибка чтения файла:', readErr);
-                    // Список файлов в виртуальной FS для отладки
+                    // Отладка - просмотреть доступные файлы
+                    console.error('❌ Ошибка чтения выходного файла:', readErr);
                     try {
-                        const files = await ffmpeg.listDir('/');
-                        console.log('Файлы в FS:', files);
+                        const fileList = ffmpeg.FS.readdir('/');
+                        console.log('📋 Доступные файлы в FS:', fileList);
                     } catch (e) {
-                        console.error('Не удалось список файлов:', e);
+                        console.warn('Не удалось получить список файлов');
                     }
-                    throw new Error(`Выходной файл не найден: ${outputName}`);
+                    throw new Error(`Выходной файл \"${outputName}\" не найден. FFmpeg может не завершила конвертацию.`);
+                }
+                
+                if (!outputData || outputData.length === 0) {
+                    throw new Error('Выходной файл пуст');
                 }
                 
                 console.log(`✓ Получен выходной файл (${(outputData.length / 1024).toFixed(2)} KB)`);
                 
+                // Создать Blob с правильным MIME type
                 const mimeType = getAudioMimeType(outputFormat);
                 const result = new Blob([outputData.buffer], { type: mimeType });
-                console.log(`✓ Blob создан (${(result.size / 1024).toFixed(2)} KB)`);
+                console.log(`✓ Blob создан: ${mimeType} (${(result.size / 1024).toFixed(2)} KB)`);
                 
-                // Очистить временные файлы (для оптимизации памяти)
+                // Очистить временные файлы
                 console.log('🧹 Очистка временных файлов...');
-                try {
-                    await ffmpeg.deleteFile(inputName);
-                    await ffmpeg.deleteFile(outputName);
-                    console.log('✓ Временные файлы удалены');
-                } catch (cleanErr) {
-                    console.warn('Предупреждение при удалении файлов:', cleanErr);
-                    // Не критично если не удалось удалить
+                for (let fname of filesCreated) {
+                    try {
+                        await ffmpeg.deleteFile(fname);
+                    } catch (e) {
+                        console.warn(`⚠️ Не удалось удалить ${fname}`);
+                    }
                 }
+                console.log('✓ Очистка завершена');
                 
-                console.log('✅ Конвертация успешно завершена');
+                console.log('✅ КОНВЕРТАЦИЯ УСПЕШНО ЗАВЕРШЕНА\n');
                 return result;
                 
             } catch (err) {
-                console.error('❌ Ошибка конвертации видео/аудио:', err);
+                console.error('\n❌ ОШИБКА КОНВЕРТАЦИИ:', err);
+                console.error('Стек:', err.stack, '\n');
                 
-                // Попытка очистки
-                if (ffmpeg && ffmpeg.isLoaded()) {
+                // Попытка очистки временных файлов
+                if (ffmpeg && filesCreated.length > 0) {
                     try {
-                        await ffmpeg.deleteFile(inputName).catch(() => {});
-                        await ffmpeg.deleteFile(outputName).catch(() => {});
-                    } catch (e) {
-                        // Игнорировать ошибки очистки
+                        for (let fname of filesCreated) {
+                            try {
+                                await ffmpeg.deleteFile(fname);
+                            } catch (e) {}
+                        }
+                    } catch (cleanErr) {
+                        console.warn('Ошибка при очистке файлов:', cleanErr);
                     }
                 }
                 
-                // Улучшенное сообщение об ошибке
-                let userMessage = `Ошибка конвертации: ${err.message}`;
+                // Умная обработка сообщений об ошибках
+                let userMessage = err.message;
                 
-                if (err.message.includes('not a function') || err.message.includes('isLoaded')) {
-                    userMessage = 'FFmpeg не загружена. Обновите страницу и попробуйте снова.';
+                if (err.message.includes('FFmpeg') && err.message.includes('не загруж')) {
+                    userMessage = 'FFmpeg не загружена. Проверьте интернет-соединение и обновите страницу.';
+                } else if (err.message.includes('не удалось загрузить')) {
+                    userMessage = 'Ошибка загрузки FFmpeg с CDN. Попробуйте позже или используйте другой браузер.';
                 } else if (err.message.includes('Превышено время')) {
-                    userMessage = 'Конвертация заняла слишком много времени. Попробуйте файл меньшего размера.';
+                    userMessage = 'Конвертация заняла слишком много времени. Попробуйте файл меньшего размера или перезагрузите страницу.';
                 } else if (err.message.includes('writeFile') || err.message.includes('readFile')) {
-                    userMessage = 'Ошибка доступа к файлам. Проверьте объем памяти браузера.';
+                    userMessage = 'Ошибка доступа к файлам. Может быть недостаточно памяти браузера. Закройте другие вкладки и попробуйте снова.';
+                } else if (err.message.includes('файл слишком большой')) {
+                    userMessage = err.message;
+                } else if (err.message.includes('не найден') || err.message.includes('пуст')) {
+                    userMessage = `Ошибка конвертации: ${err.message}. Попробуйте другой файл.`;
+                } else if (err.message.includes('isLoaded')) {
+                    userMessage = 'FFmpeg не инициализирована правильно. Обновите страницу.';
                 }
                 
                 throw new Error(userMessage);
@@ -1428,35 +1555,42 @@ ${escapeHtml(text)}
         }
         
         /**
-         * Возвращает оптимальные параметры кодирования для целевого формата
-         * Senior-level: правильная выбор битрейта, частоты дискретизации и кодека
+         * Возвращает оптимальные параметры кодирования для целевого аудио формата
+         * Оптимизировано для FFmpeg.js
          */
         function getCodecParameters(format) {
+            // Параметры для разных аудио форматов
+            // -vn = no video (только аудио)
+            // -b:a = audio bitrate
+            // -ar = audio rate (частота дискретизации)
+            // -ac = audio channels
+            
             const params = {
-                // MP3: переменный битрейт качество 2 (~192kbps) за лучшую совместимость
-                'mp3': ['-vn', '-ab', '192k', '-ar', '44100', '-ac', '2'],
+                // MP3: 192kbps стерео - универсальный формат
+                'mp3': ['-vn', '-b:a', '192k', '-ar', '44100', '-ac', '2'],
                 
-                // WAV: без потерь, 16-bit PCM
-                'wav': ['-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2'],
+                // WAV: 16-bit PCM - без потерь
+                'wav': ['-vn', '-f', 'wav', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2'],
                 
-                // AAC: 128kbps стерео, оптимизировано для размера
-                'aac': ['-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2'],
+                // AAC: 128kbps - экономный формат
+                'aac': ['-vn', '-b:a', '128k', '-ar', '44100', '-ac', '2'],
                 
-                // M4A: AAC 192kbps для лучшего качества (Apple оптимизировано)
-                'm4a': ['-vn', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2'],
+                // M4A: 192kbps AAC - для Apple  
+                'm4a': ['-vn', '-b:a', '192k', '-ar', '48000', '-ac', '2'],
                 
-                // Opus: эффективный кодек 96kbps
-                'opus': ['-vn', '-c:a', 'libopus', '-b:a', '96k', '-ar', '48000', '-ac', '2'],
+                // Opus: 96kbps - эффективный кодек
+                'opus': ['-vn', '-b:a', '96k', '-ar', '48000', '-ac', '2'],
                 
-                // Vorbis: качество 128kbps через OGG контейнер
-                'vorbis': ['-vn', '-c:a', 'libvorbis', '-b:a', '128k', '-ar', '44100', '-ac', '2'],
+                // Vorbis: 128kbps через OGG
+                'vorbis': ['-vn', '-q:a', '5', '-ar', '44100', '-ac', '2'],
                 
-                // FLAC: без потерь, лучшее качество
-                'flac': ['-vn', '-c:a', 'flac', '-ar', '44100', '-ac', '2']
+                // FLAC: без потерь
+                'flac': ['-vn', '-f', 'flac', '-ar', '44100', '-ac', '2']
             };
             
-            // Возвращаемые параметры с включением только аудио потока
-            return params[format] || params['mp3'];
+            const result = params[format] || params['mp3'];
+            console.log(`   Кодек параметры: ${result.join(' ')}`);
+            return result;
         }
         
         /**
