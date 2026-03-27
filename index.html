@@ -408,7 +408,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <!-- ffmpeg.wasm - официальная WebAssembly версия FFmpeg (работает во всех браузерах) -->
-<script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+<!-- Используем синхронную загрузку чтобы убедиться что загружена ДО её использования -->
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
 
 <script>
     // Установить worker для PDF.js
@@ -427,16 +428,45 @@
     window.ffmpegLoading = false;
     
     // CDN источники для загрузки ffmpeg-core
+    // Приоритет: jsdelivr → cdn.jsdelivr.net → unpkg → yandex (для России)
     const FFMPEG_CORE_URLS = [
         {
+            name: 'jsdelivr.net',
             coreJS: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js',
             coreWasm: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm',
         },
         {
+            name: 'unpkg.com',
             coreJS: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js',
             coreWasm: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm',
+        },
+        {
+            name: 'esm.sh (alt)',
+            coreJS: 'https://esm.sh/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js',
+            coreWasm: 'https://esm.sh/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm',
         }
     ];
+    
+    /**
+     * Проверить доступность URL до загрузки
+     */
+    async function checkURLAvailability(url, timeoutMs = 5000) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            
+            const response = await fetch(url, { 
+                method: 'HEAD',
+                signal: controller.signal,
+                mode: 'no-cors' // Important for CORS issues
+            });
+            clearTimeout(timeoutId);
+            return true;
+        } catch (err) {
+            console.warn(`[FFmpeg] Недоступна ${url}: ${err.message}`);
+            return false;
+        }
+    }
     
     /**
      * Загружает FFmpeg WebAssembly - работает в Chrome, Firefox, Safari, Edge
@@ -465,9 +495,18 @@
         window.ffmpegLoading = true;
         
         try {
-            // Проверить загрузилась ли ffmpeg.wasm библиотека
+            // КРИТИЧЕСКАЯ ПРОВЕРКА: загружена ли ffmpeg.wasm библиотека
+            console.log('[FFmpeg] 🔍 Диагностика загрузки ffmpeg.wasm...');
+            console.log('[FFmpeg] window.FFmpeg доступна?', typeof window.FFmpeg !== 'undefined');
+            
             if (!window.FFmpeg) {
-                throw new Error('ffmpeg.wasm модуль не загружен');
+                console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: ffmpeg.wasm скрипт НЕ загружен!');
+                console.error('[FFmpeg] Проверьте:');
+                console.error('  1. Подключения к интернету');
+                console.error('  2. Нет ли блокировки CDN (VPN/прокси/firewall)');
+                console.error('  3. Вкладка браузера "Консоль" → "Сеть" на CORS/CSP ошибки');
+                console.error('  4. Если используется VPN - попробуйте другую страну/сервер');
+                throw new Error('ffmpeg.wasm модуль не загружен. Проверьте интернет и параметры VPN');
             }
             
             const { FFmpeg, fetchFile } = window.FFmpeg;
@@ -476,6 +515,7 @@
                 throw new Error('FFmpeg класс недоступен из ffmpeg.wasm');
             }
             
+            console.log('[FFmpeg] ✓ ffmpeg.wasm базовый модуль инициализирован');
             console.log('[FFmpeg] 🔧 Инициализация ffmpeg.wasm version 0.12.10...');
             const ffmpeg = new FFmpeg();
             
@@ -494,9 +534,20 @@
             let loadedSuccessfully = false;
             let lastError = null;
             
-            for (let source of FFMPEG_CORE_URLS) {
+            for (let i = 0; i < FFMPEG_CORE_URLS.length; i++) {
+                const source = FFMPEG_CORE_URLS[i];
                 try {
-                    console.log(`[FFmpeg] 📍 Источник: ${source.coreJS}`);
+                    console.log(`[FFmpeg] 📍 Попытка ${i + 1}/${FFMPEG_CORE_URLS.length}: ${source.name}`);
+                    console.log(`[FFmpeg] Проверка доступности: ${source.coreWasm}`);
+                    
+                    // Проверить доступность перед загрузкой
+                    const isAvailable = await checkURLAvailability(source.coreWasm, 3000);
+                    if (!isAvailable) {
+                        console.warn(`[FFmpeg] ⚠️  ${source.name} недоступен (может быть заблокирован VPN/firewall)`);
+                        continue;
+                    }
+                    
+                    console.log(`[FFmpeg] ✓ ${source.name} доступен, загрузка...`);
                     
                     // Загрузить ffmpeg-core с явной конфигурацией
                     await ffmpeg.load({
@@ -504,17 +555,24 @@
                         wasmURL: source.coreWasm
                     });
                     
-                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${source.coreJS}`);
+                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${source.name}`);
                     loadedSuccessfully = true;
                     break;
                 } catch (err) {
-                    console.warn(`[FFmpeg] ✗ Ошибка загрузки: ${err.message}`);
+                    console.warn(`[FFmpeg] ✗ Ошибка загрузки ${source.name}: ${err.message}`);
                     lastError = err;
+                    // Продолжить со следующего источника
                 }
             }
             
             if (!loadedSuccessfully) {
-                throw new Error(`Не удалось загрузить ffmpeg-core. Ошибка: ${lastError?.message || 'Unknown'}`);
+                console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить ffmpeg-core ни с одного CDN');
+                console.error('[FFmpeg] Возможные причины:');
+                console.error('  - Все CDN заблокированы в вашей стране/сети (Россия имеет ограничения)');
+                console.error('  - Проблема с VPN конфигурацией - попробуйте другую страну');
+                console.error('  - Отключена поддержка WebAssembly в браузере');
+                console.error('  - Проблема с корпоративным firewall');
+                throw new Error(`Не удалось загрузить ffmpeg-core. Все CDN недоступны. Причина: ${lastError?.message || 'неизвестна'}`);
             }
             
             // Проверить что FFmpeg готова
@@ -636,6 +694,61 @@
         
         // Проверить библиотеки через несколько миллисекунд
         setTimeout(checkLibraries, 500);
+        
+        /**
+         * Диагностика FFmpeg для отладки проблем загрузки
+         */
+        async function ffmpegDiagnostics() {
+            console.log('\n' + '='.repeat(60));
+            console.log('📋 ДИАГНОСТИКА FFmpeg.wasm');
+            console.log('='.repeat(60));
+            
+            // Проверка WebAssembly
+            console.log('\n[WebAssembly]');
+            console.log('  Поддерживается:', typeof WebAssembly !== 'undefined');
+            if (typeof WebAssembly !== 'undefined') {
+                console.log('  - Компилятор (Instantiate):', typeof WebAssembly.instantiate !== 'undefined');
+                console.log('  - Инстантиация:', typeof WebAssembly.Instance !== 'undefined');
+            }
+            
+            // Проверка FFmpeg скрипта
+            console.log('\n[FFmpeg Скрипт]');
+            console.log('  window.FFmpeg доступна:', typeof window.FFmpeg !== 'undefined');
+            if (typeof window.FFmpeg !== 'undefined') {
+                console.log('  window.FFmpeg.FFmpeg:', typeof window.FFmpeg.FFmpeg !== 'undefined');
+                console.log('  window.FFmpeg.fetchFile:', typeof window.FFmpeg.fetchFile !== 'undefined');
+            }
+            
+            // Проверка CDN доступности
+            console.log('\n[CDN Доступность]');
+            const cdnTests = [
+                { name: 'jsdelivr.net', url: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm' },
+                { name: 'unpkg.com', url: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm' },
+                { name: 'esm.sh', url: 'https://esm.sh/@ffmpeg/core@0.12.10/dist/ffmpeg-core.wasm' }
+            ];
+            
+            for (const cdn of cdnTests) {
+                try {
+                    const response = await fetch(cdn.url, { method: 'HEAD', mode: 'no-cors' });
+                    console.log(`  ${cdn.name}: ✓ доступен`);
+                } catch (err) {
+                    console.log(`  ${cdn.name}: ✗ недоступен (${err.message})`);
+                }
+            }
+            
+            // Статус инициализации
+            console.log('\n[Статус]');
+            console.log('  Инстанс существует:', !!window.ffmpegInstance);
+            console.log('  Инстанс готов:', !!window.ffmpegReady);
+            console.log('  Загружается:', !!window.ffmpegLoading);
+            
+            console.log('\n' + '='.repeat(60));
+            console.log('Если FFmpeg не работает в России - используйте VPN!');
+            console.log('='.repeat(60) + '\n');
+        }
+        
+        // Запустить диагностику через 2 сек после загрузки страницы
+        setTimeout(ffmpegDiagnostics, 2000);
 
         // Функция ожидания загрузки библиотек с повторными попытками и диагностикой
         async function waitForLibraries(required = []) {
@@ -1425,6 +1538,9 @@ ${escapeHtml(text)}
                 console.log(`   Файл: ${file.name}`);
                 console.log(`   Размер: ${fileSizeMB} MB`);
                 console.log(`   Выходной формат: ${outputFormat}`);
+                console.log('[Диагностика] window.FFmpeg загружена?', typeof window.FFmpeg !== 'undefined');
+                console.log('[Диагностика] window.ffmpegReady?', window.ffmpegReady || false);
+                console.log('[Диагностика] Браузер поддерживает WebAssembly?', typeof WebAssembly !== 'undefined');
                 
                 // Проверка размера файла
                 const maxSizeMB = 500; // 500MB лимит для браузера
@@ -1441,9 +1557,9 @@ ${escapeHtml(text)}
                 }
                 
                 // Вторая проверка что FFmpeg реально готова
-                const isLoaded = typeof ffmpeg.isLoaded === 'function' ? ffmpeg.isLoaded() : !!ffmpeg.FS;
+                const isLoaded = !!ffmpeg.FS;
                 if (!isLoaded) {
-                    throw new Error('FFmpeg инициализирована но не готова к работе');
+                    throw new Error('FFmpeg инициализирована но FS недоступна');
                 }
                 
                 console.log('✓ FFmpeg загружена и готова');
@@ -1543,19 +1659,38 @@ ${escapeHtml(text)}
                 let userMessage = err.message;
                 
                 if (err.message.includes('FFmpeg') && err.message.includes('не загруж')) {
-                    userMessage = 'FFmpeg не загружена. Проверьте интернет-соединение и обновите страницу.';
-                } else if (err.message.includes('не удалось загрузить')) {
-                    userMessage = 'Ошибка загрузки FFmpeg с CDN. Попробуйте позже или используйте другой браузер.';
+                    userMessage = 'FFmpeg не загружена.\n\nЭто может быть вызвано:\n' +
+                                  '• Проблемой с интернет-соединением\n' +
+                                  '• Блокировкой CDN в вашей сети (Россия имеет некоторые ограничения)\n' +
+                                  '• Проблемой с VPN - если используется - попробуйте другую страну\n' +
+                                  '• Браузер не поддерживает WebAssembly\n\n' +
+                                  'Попробуйте: обновить страницу, отключить VPN или использовать мобильную сеть.';
+                } else if (err.message.includes('не удалось загрузить') || err.message.includes('CDN')) {
+                    userMessage = 'Ошибка загрузки компонентов FFmpeg с CDN.\n\n' +
+                                  'Вероятная причина: ваша сеть/страна блокирует доступ к Javascript-CDN.\n' +
+                                  'Решения:\n' +
+                                  '• Попробуйте VPN (например, со страны Европы или Америки)\n' +
+                                  '• Если используется VPN - подключитесь к другому серверу\n' +
+                                  '• Попробуйте другой браузер или мобильное приложение\n' +
+                                  '• Если у вас корпоративная сеть - свяжитесь с администратором';
                 } else if (err.message.includes('Превышено время')) {
-                    userMessage = 'Конвертация заняла слишком много времени. Попробуйте файл меньшего размера или перезагрузите страницу.';
+                    userMessage = 'Конвертация заняла слишком много времени (>5 минут).\n\n' +
+                                  'Попробуйте:\n' +
+                                  '• Использовать файл меньшего размера\n' +
+                                  '• Перезагрузить страницу\n' +
+                                  '• Закрыть другие приложения для освобождения памяти браузера';
                 } else if (err.message.includes('writeFile') || err.message.includes('readFile')) {
-                    userMessage = 'Ошибка доступа к файлам. Может быть недостаточно памяти браузера. Закройте другие вкладки и попробуйте снова.';
+                    userMessage = 'Ошибка при работе с файлами в памяти браузера.\n\n' +
+                                  'Возможные причины:\n' +
+                                  '• Недостаточно памяти (браузер занимает много памяти)\n' +
+                                  '• Файл слишком большой\n\n' +
+                                  'Попробуйте: закрыть другие вкладки браузера и использовать файл меньшего размера.';
                 } else if (err.message.includes('файл слишком большой')) {
-                    userMessage = err.message;
+                    userMessage = err.message + '\n\nМаксимум для браузерной конвертации: 500 МБ.';
                 } else if (err.message.includes('не найден') || err.message.includes('пуст')) {
-                    userMessage = `Ошибка конвертации: ${err.message}. Попробуйте другой файл.`;
-                } else if (err.message.includes('isLoaded')) {
-                    userMessage = 'FFmpeg не инициализирована правильно. Обновите страницу.';
+                    userMessage = `Ошибка конвертации: ${err.message}. Попробуйте другой видеофайл.`;
+                } else if (err.message.includes('isLoaded') || err.message.includes('FS')) {
+                    userMessage = 'FFmpeg инициализирована неправильно. Обновите страницу (Ctrl+R).';
                 }
                 
                 throw new Error(userMessage);
