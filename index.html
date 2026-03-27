@@ -436,23 +436,35 @@
         const { FFmpeg, fetchFile } = window.FFmpeg;
         const ffmpeg = new FFmpeg.FFmpeg();
         
-        // Обработка ошибок загрузки
+        // Обработка логов
         ffmpeg.on('log', ({ type, message }) => {
-            if (type === 'error') {
-                console.warn('FFmpeg warning:', message);
-            }
+            console.log(`[FFmpeg ${type}]:`, message);
+        });
+        
+        // Обработка прогресса
+        ffmpeg.on('progress', ({ progress, time }) => {
+            console.log(`Прогресс: ${(progress * 100).toFixed(2)}% (${time}ms)`);
         });
         
         try {
-            await ffmpeg.load();
+            // Загрузить FFmpeg с явной конфигурацией coreURL
+            const coreURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@latest/dist/umd/ffmpeg-core.js';
+            
+            console.log('Загрузка FFmpeg ядра...');
+            await ffmpeg.load({
+                coreURL: coreURL
+            });
+            
             window.ffmpegInstance = ffmpeg;
             window.ffmpegReady = true;
             window.FFmpegFetchFile = fetchFile;
-            console.log('FFmpeg успешно загружен');
+            console.log('✓ FFmpeg успешно загружен и готов к работе');
             return ffmpeg;
         } catch (err) {
-            console.error('FFmpeg загрузка ошибка:', err);
-            throw new Error('Не удалось загрузить FFmpeg. Попробуйте позже.');
+            console.error('✗ FFmpeg загрузка ошибка:', err);
+            window.ffmpegReady = false;
+            window.ffmpegInstance = null;
+            throw new Error(`FFmpeg инициализация ошибка: ${err.message}`);
         }
     }
 </script>
@@ -500,7 +512,8 @@
                 'docx (Packer)': window.docx && window.docx.Packer ? window.docx.Packer : null,
                 'html2pdf': window.html2pdf,
                 'XLSX': window.XLSX,
-                'pdfjsLib': window.pdfjsLib
+                'pdfjsLib': window.pdfjsLib,
+                'FFmpeg': window.FFmpeg
             };
             
             const statuses = Object.entries(libs).map(([name, lib]) => {
@@ -508,17 +521,23 @@
             });
             
             console.log('Статус библиотек:\n' + statuses.join('\n'));
-            console.log('Объект window.docx:', window.docx);
+            console.log('Объект window.docx:', !!window.docx);
             console.log('Объект window.pdfjsLib:', !!window.pdfjsLib);
+            console.log('Объект window.FFmpeg:', !!window.FFmpeg);
+            console.log('FFmpeg Instance статус:', {
+                initialized: !!window.ffmpegInstance,
+                ready: !!window.ffmpegReady,
+                loaded: window.ffmpegInstance ? window.ffmpegInstance.isLoaded?.() : false
+            });
             
             const missing = Object.entries(libs)
                 .filter(([name, lib]) => !lib)
                 .map(([name]) => name);
             
             if (missing.length > 0) {
-                console.warn('Отсутствуют:', missing.join(', '));
+                console.warn('Отсутствуют (не критично для базовых функций):', missing.join(', '));
             } else {
-                console.log('Все необходимые библиотеки загружены');
+                console.log('✓ Все необходимые библиотеки загружены');
             }
         }
         
@@ -666,13 +685,14 @@
             statusBlock.appendChild(wrapper);
         }
 
-        function showLoadingStatus() {
+        function showLoadingStatus(message = '') {
             statusBlock.innerHTML = '';
             const wrapper = document.createElement('div');
             wrapper.className = 'status-area';
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'status-message';
-            loadingDiv.innerHTML = `<span class="spinner"></span> Конвертация в процессе, пожалуйста, подождите...`;
+            const loadingMsg = message || 'Конвертация в процессе, пожалуйста, подождите...';
+            loadingDiv.innerHTML = `<span class="spinner"></span> ${loadingMsg}`;
             wrapper.appendChild(loadingDiv);
             statusBlock.appendChild(wrapper);
         }
@@ -1297,52 +1317,113 @@ ${escapeHtml(text)}
          * @returns {Promise<Blob>} - конвертированный аудио файл
          */
         async function convertAudioVideo(file, outputFormat) {
+            let ffmpeg = null;
+            const inputName = `input_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            const outputName = `output.${outputFormat}`;
+            
             try {
-                // Загрузить FFmpeg асинхронно с обработкой ошибок
-                const ffmpeg = await getFFmpegInstance();
+                console.log(`Начало конвертации: ${file.name} → ${outputFormat}`);
+                console.log(`Размер файла: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
                 
-                if (!ffmpeg) {
-                    throw new Error('FFmpeg не инициализирован');
+                // Загрузить FFmpeg асинхронно
+                ffmpeg = await getFFmpegInstance();
+                
+                if (!ffmpeg || !ffmpeg.isLoaded()) {
+                    throw new Error('FFmpeg не загружена корректно');
                 }
                 
-                // Проверить доступ FFmpeg
-                if (!window.FFmpegFetchFile) {
-                    throw new Error('FFmpeg fetch функция недоступна');
-                }
-                
-                const fileName = file.name;
-                const inputName = `input_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-                const outputName = `output.${outputFormat}`;
-                
-                // Загрузить файл в FFmpeg виртуальную файловую систему
+                console.log('📁 Загрузка файла в виртуальную FS...');
                 const fileData = await file.arrayBuffer();
-                await ffmpeg.writeFile(inputName, new Uint8Array(fileData));
+                const uint8Array = new Uint8Array(fileData);
+                
+                // Записать файл в виртуальную файловую систему FFmpeg
+                await ffmpeg.writeFile(inputName, uint8Array);
+                console.log(`✓ Файл загружен (${(uint8Array.length / 1024 / 1024).toFixed(2)} MB)`);
                 
                 // Оптимизированные параметры кодирования для разных форматов
                 const codecParams = getCodecParameters(outputFormat);
                 
-                // Запустить FFmpeg команду конвертации
+                // Запустить FFmpeg команду конвертации с флагом -y для перезаписи
                 const cmd = [
+                    '-y',  // Перезаписать выходной файл без запроса
                     '-i', inputName,
                     ...codecParams,
                     outputName
                 ];
                 
-                await ffmpeg.exec(cmd);
+                console.log('⚙️ Запуск FFmpeg конвертации...', cmd.join(' '));
+                
+                // Запустить конвертацию с таймаутом
+                const conversionPromise = ffmpeg.exec(cmd);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Превышено время ожидания конвертации (>5 минут)')), 300000)
+                );
+                
+                await Promise.race([conversionPromise, timeoutPromise]);
+                console.log('✓ FFmpeg конвертация завершена');
                 
                 // Получить результирующий файл
-                const outputData = await ffmpeg.readFile(outputName);
+                console.log('📤 Чтение выходного файла...');
+                let outputData;
+                try {
+                    outputData = await ffmpeg.readFile(outputName);
+                } catch (readErr) {
+                    console.error('Ошибка чтения файла:', readErr);
+                    // Список файлов в виртуальной FS для отладки
+                    try {
+                        const files = await ffmpeg.listDir('/');
+                        console.log('Файлы в FS:', files);
+                    } catch (e) {
+                        console.error('Не удалось список файлов:', e);
+                    }
+                    throw new Error(`Выходной файл не найден: ${outputName}`);
+                }
+                
+                console.log(`✓ Получен выходной файл (${(outputData.length / 1024).toFixed(2)} KB)`);
+                
                 const mimeType = getAudioMimeType(outputFormat);
                 const result = new Blob([outputData.buffer], { type: mimeType });
+                console.log(`✓ Blob создан (${(result.size / 1024).toFixed(2)} KB)`);
                 
                 // Очистить временные файлы (для оптимизации памяти)
-                await ffmpeg.deleteFile(inputName);
-                await ffmpeg.deleteFile(outputName);
+                console.log('🧹 Очистка временных файлов...');
+                try {
+                    await ffmpeg.deleteFile(inputName);
+                    await ffmpeg.deleteFile(outputName);
+                    console.log('✓ Временные файлы удалены');
+                } catch (cleanErr) {
+                    console.warn('Предупреждение при удалении файлов:', cleanErr);
+                    // Не критично если не удалось удалить
+                }
                 
+                console.log('✅ Конвертация успешно завершена');
                 return result;
+                
             } catch (err) {
-                console.error('Ошибка конвертации видео/аудио:', err);
-                throw new Error(`Не удалось конвертировать аудио (${outputFormat}): ${err.message}`);
+                console.error('❌ Ошибка конвертации видео/аудио:', err);
+                
+                // Попытка очистки
+                if (ffmpeg && ffmpeg.isLoaded()) {
+                    try {
+                        await ffmpeg.deleteFile(inputName).catch(() => {});
+                        await ffmpeg.deleteFile(outputName).catch(() => {});
+                    } catch (e) {
+                        // Игнорировать ошибки очистки
+                    }
+                }
+                
+                // Улучшенное сообщение об ошибке
+                let userMessage = `Ошибка конвертации: ${err.message}`;
+                
+                if (err.message.includes('not a function') || err.message.includes('isLoaded')) {
+                    userMessage = 'FFmpeg не загружена. Обновите страницу и попробуйте снова.';
+                } else if (err.message.includes('Превышено время')) {
+                    userMessage = 'Конвертация заняла слишком много времени. Попробуйте файл меньшего размера.';
+                } else if (err.message.includes('writeFile') || err.message.includes('readFile')) {
+                    userMessage = 'Ошибка доступа к файлам. Проверьте объем памяти браузера.';
+                }
+                
+                throw new Error(userMessage);
             }
         }
         
@@ -1352,16 +1433,30 @@ ${escapeHtml(text)}
          */
         function getCodecParameters(format) {
             const params = {
-                'mp3': ['-c:a', 'libmp3lame', '-q:a', '2', '-f', 'mp3'],  // VBR качество 2 (примерно 192kbps)
-                'wav': ['-c:a', 'pcm_s16le', '-f', 'wav'],  // 16-bit PCM
-                'aac': ['-c:a', 'aac', '-b:a', '192k', '-f', 'adts'],  // AAC 192kbps
-                'm4a': ['-c:a', 'aac', '-b:a', '192k', '-f', 'ipod'],  // M4A с оптимизацией для Apple
-                'opus': ['-c:a', 'libopus', '-b:a', '128k', '-f', 'opus'],  // Opus 128kbps
-                'vorbis': ['-c:a', 'libvorbis', '-q:a', '5', '-f', 'ogg'],  // Vorbis качество 5
-                'flac': ['-c:a', 'flac', '-f', 'flac']  // Lossless FLAC
+                // MP3: переменный битрейт качество 2 (~192kbps) за лучшую совместимость
+                'mp3': ['-vn', '-ab', '192k', '-ar', '44100', '-ac', '2'],
+                
+                // WAV: без потерь, 16-bit PCM
+                'wav': ['-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2'],
+                
+                // AAC: 128kbps стерео, оптимизировано для размера
+                'aac': ['-vn', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2'],
+                
+                // M4A: AAC 192kbps для лучшего качества (Apple оптимизировано)
+                'm4a': ['-vn', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2'],
+                
+                // Opus: эффективный кодек 96kbps
+                'opus': ['-vn', '-c:a', 'libopus', '-b:a', '96k', '-ar', '48000', '-ac', '2'],
+                
+                // Vorbis: качество 128kbps через OGG контейнер
+                'vorbis': ['-vn', '-c:a', 'libvorbis', '-b:a', '128k', '-ar', '44100', '-ac', '2'],
+                
+                // FLAC: без потерь, лучшее качество
+                'flac': ['-vn', '-c:a', 'flac', '-ar', '44100', '-ac', '2']
             };
             
-            return params[format] || params['mp3'];  // Default to MP3 if format not found
+            // Возвращаемые параметры с включением только аудио потока
+            return params[format] || params['mp3'];
         }
         
         /**
@@ -1402,7 +1497,15 @@ ${escapeHtml(text)}
             
             isConverting = true;
             convertBtn.disabled = true;
-            showLoadingStatus();
+            
+            // Специальное сообщение для видео конвертации
+            const videoAudioFormats = ['mp4-mp3', 'webm-mp3', 'mov-mp3', '3gp-mp3', 'mp4-wav', 'webm-wav', 
+                                       'mp4-aac', 'webm-aac', 'mp4-m4a', 'mkv-mp3', 'flv-mp3', 'avi-mp3'];
+            const isVideoConversion = videoAudioFormats.includes(conversionTypeSelect.value);
+            const statusMsg = isVideoConversion ? 
+                '⏳ Извлечение аудио из видео (может занять несколько минут)...' :
+                'Конвертация в процессе, пожалуйста, подождите...';
+            showLoadingStatus(statusMsg);
             
             try {
                 const conversionType = conversionTypeSelect.value;
@@ -1529,6 +1632,20 @@ ${escapeHtml(text)}
             if (currentFile && !validateFileFormat(currentFile)) {
                 showStatus('Файл не совместим!', true);
                 resetFileSelection();
+            }
+            
+            // Предварительная загрузка FFmpeg для видео/аудио конвертации
+            const conversionType = conversionTypeSelect.value;
+            const videoAudioFormats = ['mp4-mp3', 'webm-mp3', 'mov-mp3', '3gp-mp3', 'mp4-wav', 'webm-wav', 
+                                       'mp4-aac', 'webm-aac', 'mp4-m4a', 'mkv-mp3', 'flv-mp3', 'avi-mp3'];
+            
+            if (videoAudioFormats.includes(conversionType) && !window.ffmpegReady) {
+                console.log('🔄 Предварительная загрузка FFmpeg...');
+                // Загрузить FFmpeg в фоне (не блокировать UI)
+                getFFmpegInstance().catch(err => {
+                    console.warn('Предупреждение: FFmpeg фоновая загрузка ошибка:', err.message);
+                    // Не критично - попытка загрузки произойдет при конвертации
+                });
             }
         });
         
