@@ -632,15 +632,35 @@
      * @returns {Promise<Object>} FFmpeg экземпляр
      */
     async function getFFmpegInstance() {
-        // Сначала подождать пока FFmpeg загрузится через fallback если нужно
-        console.log('[FFmpeg] ⏳ Ожидание загрузки FFmpeg скрипта (может быть через fallback CDN)...');
-        let totalAttempts = 0;
-        const maxAttempts = 120; // 60 сек максимум
+        // Если уже загружена и готова - вернуть сразу БЕЗ ожиданий
+        if (window.ffmpegInstance && window.ffmpegReady) {
+            console.log('[FFmpeg] ✓ Используется кэшированный экземпляр');
+            return window.ffmpegInstance;
+        }
         
-        while (!window.FFmpeg && !window.ffmpegLoadFailed && totalAttempts < maxAttempts) {
-            console.log(`[FFmpeg] ⏳ Попытка ${totalAttempts + 1}/${maxAttempts}: Ожидание загрузки...`);
+        // Если уже загружается в фоне - подождать максимум 120 попыток (60 сек)
+        if (window.ffmpegLoading) {
+            console.log('[FFmpeg] ⏳ Ожидание завершения FFmpeg инициализации (запущена в фоне)...');
+            let attempts = 0;
+            while (window.ffmpegLoading && attempts < 120) {
+                if (attempts % 4 === 0) console.log(`[FFmpeg] ⏳ Ожидание... (${attempts / 2}сек)`);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                attempts++;
+            }
+            
+            // Если всё равно не готова после ожидания - это ошибка
+            if (!window.ffmpegInstance || !window.ffmpegReady) {
+                throw new Error('FFmpeg инициализация завис или не завершилась.');
+            }
+            return window.ffmpegInstance;
+        }
+        
+        // Проверить доступность FFmpeg скрипта (максимум 30 сек)
+        console.log('[FFmpeg] 🔍 Проверка если FFmpeg уже загружена...');
+        let scriptCheckAttempts = 0;
+        while (!window.FFmpeg && !window.ffmpegLoadFailed && scriptCheckAttempts < 60) {
             await new Promise(resolve => setTimeout(resolve, 500));
-            totalAttempts++;
+            scriptCheckAttempts++;
         }
         
         // Проверка результата
@@ -649,34 +669,9 @@
             throw new Error('FFmpeg скрипт не загружен. Все CDN заблокированы. Используйте VPN!');
         }
         
-        if (!window.FFmpeg && totalAttempts >= maxAttempts) {
-            console.error(`[FFmpeg] ❌ Превышено время ожидания (${maxAttempts * 500}мс) - FFmpeg не загружена`);
-            throw new Error('FFmpeg не загружена даже после ожидания 60 сек. CDN может быть заблокирован.');
-        }
-        
-        // Проверка если ВСЕ CDN заблокированы
-        if (window.ffmpegLoadFailed || (!window.FFmpeg && attempts >= 60)) {
-            console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: FFmpeg скрипт не загружен с ни одного CDN');
-            throw new Error('FFmpeg скрипт не загружен. ВСЕ CDN заблокированы. Используйте VPN!');
-        }
-        
-        // Если уже загружена - вернуть сразу
-        if (window.ffmpegInstance && window.ffmpegReady) {
-            console.log('[FFmpeg] ✓ Используется кэшированный экземпляр');
-            return window.ffmpegInstance;
-        }
-        
-        // Если уже загружается - подождать
-        if (window.ffmpegLoading) {
-            console.log('[FFmpeg] ⏳ Ожидание завершения загрузки...');
-            let attempts = 0;
-            while (window.ffmpegLoading && attempts < 120) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                attempts++;
-            }
-            if (window.ffmpegInstance && window.ffmpegReady) {
-                return window.ffmpegInstance;
-            }
+        if (!window.FFmpeg && scriptCheckAttempts >= 60) {
+            console.error(`[FFmpeg] ❌ FFmpeg скрипт не загружена за ${scriptCheckAttempts * 500}мс`);
+            throw new Error('FFmpeg скрипт не загружена. CDN может быть заблокирован.');
         }
         
         window.ffmpegLoading = true;
@@ -725,26 +720,29 @@
                 const source = FFMPEG_CORE_URLS[i];
                 try {
                     console.log(`[FFmpeg] 📍 Попытка ${i + 1}/${FFMPEG_CORE_URLS.length}: ${source.name}`);
-                    console.log(`[FFmpeg] Проверка доступности: ${source.coreWasm}`);
+                    console.log(`[FFmpeg] ✓ Загрузка ffmpeg-core с ${source.name} (максимум 20сек)...`);
                     
-                    // Проверить доступность перед загрузкой
-                    const isAvailable = await checkURLAvailability(source.coreWasm, 3000);
-                    if (!isAvailable) {
-                        console.warn(`[FFmpeg] ⚠️  ${source.name} недоступен (может быть заблокирован VPN/firewall)`);
-                        continue;
+                    // Загрузить ffmpeg-core с явной конфигурацией + TIMEOUT
+                    try {
+                        const loadPromise = ffmpeg.load({
+                            coreURL: source.coreJS,
+                            wasmURL: source.coreWasm
+                        });
+                        
+                        // Ждать с таймаутом 20 секунд
+                        const timeoutPromise = new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Таймаут загрузки ffmpeg-core (20сек)')), 20000)
+                        );
+                        
+                        await Promise.race([loadPromise, timeoutPromise]);
+                        
+                        console.log(`[FFmpeg] ✓ Успешно загружена с: ${source.name}`);
+                        loadedSuccessfully = true;
+                        break;
+                    } catch (timeoutErr) {
+                        console.warn(`[FFmpeg] ⚠️ Проблема с загрузкой ${source.name}: ${timeoutErr.message}`);
+                        lastError = timeoutErr;
                     }
-                    
-                    console.log(`[FFmpeg] ✓ ${source.name} доступен, загрузка...`);
-                    
-                    // Загрузить ffmpeg-core с явной конфигурацией
-                    await ffmpeg.load({
-                        coreURL: source.coreJS,
-                        wasmURL: source.coreWasm
-                    });
-                    
-                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${source.name}`);
-                    loadedSuccessfully = true;
-                    break;
                 } catch (err) {
                     console.warn(`[FFmpeg] ✗ Ошибка загрузки ${source.name}: ${err.message}`);
                     lastError = err;
@@ -753,13 +751,22 @@
             }
             
             if (!loadedSuccessfully) {
-                console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить ffmpeg-core ни с одного CDN');
-                console.error('[FFmpeg] Возможные причины:');
-                console.error('  - Все CDN заблокированы в вашей стране/сети (Россия имеет ограничения)');
-                console.error('  - Проблема с VPN конфигурацией - попробуйте другую страну');
-                console.error('  - Отключена поддержка WebAssembly в браузере');
-                console.error('  - Проблема с корпоративным firewall');
-                throw new Error(`Не удалось загрузить ffmpeg-core. Все CDN недоступны. Причина: ${lastError?.message || 'неизвестна'}`);
+                console.warn('[FFmpeg] ⚠️ Не удалось загрузить через явные URLs. Пробуем загрузить без явной конфигурации...');
+                
+                try {
+                    // Может быть ffmpeg-core загружен автоматически или доступен через глобальный контекст
+                    await ffmpeg.load();
+                    loadedSuccessfully = true;
+                    console.log('[FFmpeg] ✓ FFmpeg загружена с автоматической конфигурацией');
+                } catch (autoLoadErr) {
+                    console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить ffmpeg-core ни с одного CDN');
+                    console.error('[FFmpeg] Возможные причины:');
+                    console.error('  - Все CDN заблокированы в вашей стране/сети (Россия имеет ограничения)');
+                    console.error('  - Проблема с VPN конфигурацией - попробуйте другую страну');
+                    console.error('  - Отключена поддержка WebAssembly в браузере');
+                    console.error('  - Проблема с корпоративным firewall');
+                    throw new Error(`Не удалось загрузить ffmpeg-core. Все CDN недоступны. Причина: ${lastError?.message || autoLoadErr?.message || 'неизвестна'}`);
+                }
             }
             
             // Проверить что FFmpeg готова
