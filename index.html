@@ -723,6 +723,15 @@
                     console.log(`[FFmpeg] 📍 Попытка ${i + 1}/${FFMPEG_CORE_URLS.length}: ${source.name}`);
                     console.log(`[FFmpeg] ✓ Загрузка ffmpeg-core с ${source.name} (максимум 20сек)...`);
                     
+                    // ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА: убедимся что WASM файл доступен
+                    console.log(`[FFmpeg] 🔍 Проверка доступности WASM файла: ${source.coreWasm}`);
+                    try {
+                        const wasmCheck = await fetch(source.coreWasm, { method: 'HEAD', mode: 'no-cors' });
+                        console.log(`[FFmpeg] ✓ WASM доступен (HTTP ${wasmCheck.status || 'ok'})`);
+                    } catch (wasmCheckErr) {
+                        console.warn(`[FFmpeg] ⚠️ WASM файл может быть недоступен: ${wasmCheckErr.message} - но попробуем всё равно`);
+                    }
+                    
                     // Загрузить ffmpeg-core с явной конфигурацией + TIMEOUT
                     try {
                         console.log(`[FFmpeg] ⏳ Вызов ffmpeg.load() для ${source.name}...`);
