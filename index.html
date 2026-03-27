@@ -713,27 +713,44 @@
             
             console.log('[FFmpeg] 📍 Загрузка ffmpeg-core WASM...');
             
-            // Попробовать загрузить с первого доступного источника
+            // Попробовать загрузить с АВТОМАТИЧЕСКОЙ конфигурацией (браузер найдет сам)
+            // Это работает лучше чем явная конфигурация которая может быть поломана на некоторых CDN
             let loadedSuccessfully = false;
-            let lastError = null;
             
-            for (let i = 0; i < FFMPEG_CORE_URLS.length; i++) {
-                const source = FFMPEG_CORE_URLS[i];
-                try {
-                    console.log(`[FFmpeg] 📍 Попытка ${i + 1}/${FFMPEG_CORE_URLS.length}: ${source.name}`);
-                    console.log(`[FFmpeg] ✓ Загрузка ffmpeg-core с ${source.name} (максимум 20сек)...`);
-                    
-                    // ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА: убедимся что WASM файл доступен
-                    console.log(`[FFmpeg] 🔍 Проверка доступности WASM файла: ${source.coreWasm}`);
+            try {
+                console.log('[FFmpeg] ⏳ Попытка 1: Загрузка ffmpeg-core с АВТОМАТИЧЕСКЕОЙ конфигурацией...');
+                const autoLoadPromise = ffmpeg.load();
+                
+                // Ждать с таймаутом 30 секунд
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Таймаут автоматической загрузки (30сек)')), 30000)
+                );
+                
+                await Promise.race([autoLoadPromise, timeoutPromise]);
+                console.log('[FFmpeg] ✓ ffmpeg-core успешно загружена с автоматической конфигурацией');
+                loadedSuccessfully = true;
+            } catch (autoLoadErr) {
+                console.warn(`[FFmpeg] ⚠️ Автоматическая загрузка не сработала: ${autoLoadErr.message}`);
+                
+                // Если автоматическая не сработала - пробуем явные URLs как fallback
+                console.log('[FFmpeg] ⏳ Попытка 2: Пробуем явные URLs (fallback)...');
+                let lastError = null;
+                
+                for (let i = 0; i < FFMPEG_CORE_URLS.length; i++) {
+                    const source = FFMPEG_CORE_URLS[i];
                     try {
-                        const wasmCheck = await fetch(source.coreWasm, { method: 'HEAD', mode: 'no-cors' });
-                        console.log(`[FFmpeg] ✓ WASM доступен (HTTP ${wasmCheck.status || 'ok'})`);
-                    } catch (wasmCheckErr) {
-                        console.warn(`[FFmpeg] ⚠️ WASM файл может быть недоступен: ${wasmCheckErr.message} - но попробуем всё равно`);
-                    }
-                    
-                    // Загрузить ffmpeg-core с явной конфигурацией + TIMEOUT
-                    try {
+                        console.log(`[FFmpeg] 📍 Попытка ${i + 2}/${FFMPEG_CORE_URLS.length + 1}: ${source.name}`);
+                        console.log(`[FFmpeg] ✓ Загрузка ffmpeg-core с ${source.name} (максимум 20сек)...`);
+                        
+                        // ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА: убедимся что WASM файл доступен
+                        console.log(`[FFmpeg] 🔍 Проверка доступности WASM файла: ${source.coreWasm}`);
+                        try {
+                            const wasmCheck = await fetch(source.coreWasm, { method: 'HEAD', mode: 'no-cors' });
+                            console.log(`[FFmpeg] ✓ WASM доступен (HTTP ${wasmCheck.status || 'ok'})`);
+                        } catch (wasmCheckErr) {
+                            console.warn(`[FFmpeg] ⚠️ WASM файл может быть недоступен: ${wasmCheckErr.message} - но попробуем всё равно`);
+                        }
+                        
                         console.log(`[FFmpeg] ⏳ Вызов ffmpeg.load() для ${source.name}...`);
                         const loadPromise = ffmpeg.load({
                             coreURL: source.coreJS,
@@ -758,30 +775,16 @@
                         console.warn(`[FFmpeg] ⚠️ Проблема с загрузкой ${source.name}: ${timeoutErr.message}`);
                         lastError = timeoutErr;
                     }
-                } catch (err) {
-                    console.warn(`[FFmpeg] ✗ Ошибка загрузки ${source.name}: ${err.message}`);
-                    lastError = err;
-                    // Продолжить со следующего источника
                 }
-            }
-            
-            if (!loadedSuccessfully) {
-                console.warn('[FFmpeg] ⚠️ Не удалось загрузить через явные URLs. Пробуем загрузить без явной конфигурации...');
                 
-                try {
-                    console.log('[FFmpeg] ⏳ Вызов ffmpeg.load() БЕЗ параметров...');
-                    await ffmpeg.load();
-                    console.log('[FFmpeg] ✓ ffmpeg.load() завершилась успешно (автоматическая конфигурация)');
-                    loadedSuccessfully = true;
-                    console.log('[FFmpeg] ✓ FFmpeg загружена с автоматической конфигурацией');
-                } catch (autoLoadErr) {
+                if (!loadedSuccessfully) {
                     console.error('[FFmpeg] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить ffmpeg-core ни с одного CDN');
                     console.error('[FFmpeg] Возможные причины:');
                     console.error('  - Все CDN заблокированы в вашей стране/сети (Россия имеет ограничения)');
                     console.error('  - Проблема с VPN конфигурацией - попробуйте другую страну');
                     console.error('  - Отключена поддержка WebAssembly в браузере');
                     console.error('  - Проблема с корпоративным firewall');
-                    throw new Error(`Не удалось загрузить ffmpeg-core. Все CDN недоступны. Причина: ${lastError?.message || autoLoadErr?.message || 'неизвестна'}`);
+                    throw new Error(`Не удалось загрузить ffmpeg-core. Все CDN недоступны. Причина: ${lastError?.message || 'неизвестна'}`);
                 }
             }
             
