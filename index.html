@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Универсальный конвертер документов и изображений</title>
+    <title>Универсальный конвертер документов, изображений и видео</title>
     <style>
         * {
             margin: 0;
@@ -325,7 +325,7 @@
 <div class="converter-card">
     <div class="header">
         <h1>Универсальный конвертер</h1>
-        <p>Конвертируйте документы и изображения в нужные форматы</p>
+        <p>Конвертируйте документы, изображения, видео и аудио в нужные форматы</p>
     </div>
     <div class="content">
         <div class="format-selector">
@@ -362,6 +362,20 @@
                     <option value="html-pdf">HTML в PDF</option>
                     <option value="txt-html">TXT в HTML</option>
                 </optgroup>
+                <optgroup label="Видео и Аудио">
+                    <option value="mp4-mp3">MP4 в MP3</option>
+                    <option value="webm-mp3">WebM в MP3</option>
+                    <option value="mov-mp3">MOV в MP3</option>
+                    <option value="3gp-mp3">3GP в MP3</option>
+                    <option value="mp4-wav">MP4 в WAV</option>
+                    <option value="webm-wav">WebM в WAV</option>
+                    <option value="mp4-aac">MP4 в AAC</option>
+                    <option value="webm-aac">WebM в AAC</option>
+                    <option value="mp4-m4a">MP4 в M4A</option>
+                    <option value="mkv-mp3">MKV в MP3</option>
+                    <option value="flv-mp3">FLV в MP3</option>
+                    <option value="avi-mp3">AVI в MP3</option>
+                </optgroup>
             </select>
         </div>
 
@@ -383,7 +397,7 @@
 
         <div id="statusBlock"></div>
         <div class="footer-note">
-            Конвертация происходит полностью в вашем браузере. Файлы не загружаются на сервер — безопасно и приватно.
+            Конвертация происходит полностью в вашем браузере. Файлы не загружаются на сервер — безопасно и приватно. Видео конвертация может занять время в зависимости от размера файла.
         </div>
     </div>
 </div>
@@ -393,11 +407,53 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js"></script>
 
 <script>
     // Установить worker для PDF.js
     if (typeof pdfjsLib !== 'undefined') {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+</script>
+
+<script>
+    /**
+     * FFmpeg инициализация - Senior level implementation
+     * Использует асинхронную загрузку и кэширование экземпляра
+     */
+    window.ffmpegInstance = null;
+    window.ffmpegReady = false;
+    
+    async function getFFmpegInstance() {
+        if (window.ffmpegInstance && window.ffmpegReady) {
+            return window.ffmpegInstance;
+        }
+        
+        if (!window.FFmpeg) {
+            throw new Error('FFmpeg библиотека не загружена. Проверьте интернет-соединение.');
+        }
+        
+        const { FFmpeg, fetchFile } = window.FFmpeg;
+        const ffmpeg = new FFmpeg.FFmpeg();
+        
+        // Обработка ошибок загрузки
+        ffmpeg.on('log', ({ type, message }) => {
+            if (type === 'error') {
+                console.warn('FFmpeg warning:', message);
+            }
+        });
+        
+        try {
+            await ffmpeg.load();
+            window.ffmpegInstance = ffmpeg;
+            window.ffmpegReady = true;
+            window.FFmpegFetchFile = fetchFile;
+            console.log('FFmpeg успешно загружен');
+            return ffmpeg;
+        } catch (err) {
+            console.error('FFmpeg загрузка ошибка:', err);
+            throw new Error('Не удалось загрузить FFmpeg. Попробуйте позже.');
+        }
     }
 </script>
 
@@ -490,6 +546,9 @@
                                    window.docx.TextRun;
                     } else if (libName === 'pdfjsLib') {
                         isLoaded = !!window.pdfjsLib;
+                    } else if (libName === 'FFmpeg') {
+                        // Специальная проверка для FFmpeg - асинхронная загрузка
+                        isLoaded = !!window.FFmpeg;
                     } else {
                         isLoaded = !!window[libName];
                     }
@@ -518,6 +577,8 @@
                     return !(window.docx && window.docx.Document && window.docx.Packer);
                 } else if (lib === 'pdfjsLib') {
                     return !window.pdfjsLib;
+                } else if (lib === 'FFmpeg') {
+                    return !window.FFmpeg;
                 }
                 return !window[lib];
             });
@@ -560,7 +621,20 @@
             'markdown-html': { from: ['.md', '.markdown'], to: 'html', name: 'Markdown в HTML' },
             'html-markdown': { from: ['.html', '.htm'], to: 'md', name: 'HTML в Markdown' },
             'html-pdf': { from: ['.html', '.htm'], to: 'pdf', name: 'HTML в PDF' },
-            'txt-html': { from: ['.txt'], to: 'html', name: 'TXT в HTML' }
+            'txt-html': { from: ['.txt'], to: 'html', name: 'TXT в HTML' },
+            // Видео и Аудио конвертация
+            'mp4-mp3': { from: ['.mp4'], to: 'mp3', name: 'MP4 в MP3' },
+            'webm-mp3': { from: ['.webm'], to: 'mp3', name: 'WebM в MP3' },
+            'mov-mp3': { from: ['.mov'], to: 'mp3', name: 'MOV в MP3' },
+            '3gp-mp3': { from: ['.3gp'], to: 'mp3', name: '3GP в MP3' },
+            'mp4-wav': { from: ['.mp4'], to: 'wav', name: 'MP4 в WAV' },
+            'webm-wav': { from: ['.webm'], to: 'wav', name: 'WebM в WAV' },
+            'mp4-aac': { from: ['.mp4'], to: 'aac', name: 'MP4 в AAC' },
+            'webm-aac': { from: ['.webm'], to: 'aac', name: 'WebM в AAC' },
+            'mp4-m4a': { from: ['.mp4'], to: 'm4a', name: 'MP4 в M4A' },
+            'mkv-mp3': { from: ['.mkv'], to: 'mp3', name: 'MKV в MP3' },
+            'flv-mp3': { from: ['.flv'], to: 'mp3', name: 'FLV в MP3' },
+            'avi-mp3': { from: ['.avi'], to: 'mp3', name: 'AVI в MP3' }
         };
 
         function clearStatus() {
@@ -1213,6 +1287,100 @@ ${escapeHtml(text)}
             return new Blob([html], { type: 'text/html;charset=utf-8' });
         }
 
+        // ===== КОНВЕРТЕР ВИДЕО И АУДИО (FFMPEG) =====
+        
+        /**
+         * Конвертирует видео/аудио файлы в различные форматы
+         * Senior-level implementation с обработкой ошибок и оптимизацией
+         * @param {File} file - исходный видео/аудио файл
+         * @param {string} outputFormat - выходной формат (mp3, wav, aac и т.д.)
+         * @returns {Promise<Blob>} - конвертированный аудио файл
+         */
+        async function convertAudioVideo(file, outputFormat) {
+            try {
+                // Загрузить FFmpeg асинхронно с обработкой ошибок
+                const ffmpeg = await getFFmpegInstance();
+                
+                if (!ffmpeg) {
+                    throw new Error('FFmpeg не инициализирован');
+                }
+                
+                // Проверить доступ FFmpeg
+                if (!window.FFmpegFetchFile) {
+                    throw new Error('FFmpeg fetch функция недоступна');
+                }
+                
+                const fileName = file.name;
+                const inputName = `input_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+                const outputName = `output.${outputFormat}`;
+                
+                // Загрузить файл в FFmpeg виртуальную файловую систему
+                const fileData = await file.arrayBuffer();
+                await ffmpeg.writeFile(inputName, new Uint8Array(fileData));
+                
+                // Оптимизированные параметры кодирования для разных форматов
+                const codecParams = getCodecParameters(outputFormat);
+                
+                // Запустить FFmpeg команду конвертации
+                const cmd = [
+                    '-i', inputName,
+                    ...codecParams,
+                    outputName
+                ];
+                
+                await ffmpeg.exec(cmd);
+                
+                // Получить результирующий файл
+                const outputData = await ffmpeg.readFile(outputName);
+                const mimeType = getAudioMimeType(outputFormat);
+                const result = new Blob([outputData.buffer], { type: mimeType });
+                
+                // Очистить временные файлы (для оптимизации памяти)
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+                
+                return result;
+            } catch (err) {
+                console.error('Ошибка конвертации видео/аудио:', err);
+                throw new Error(`Не удалось конвертировать аудио (${outputFormat}): ${err.message}`);
+            }
+        }
+        
+        /**
+         * Возвращает оптимальные параметры кодирования для целевого формата
+         * Senior-level: правильная выбор битрейта, частоты дискретизации и кодека
+         */
+        function getCodecParameters(format) {
+            const params = {
+                'mp3': ['-c:a', 'libmp3lame', '-q:a', '2', '-f', 'mp3'],  // VBR качество 2 (примерно 192kbps)
+                'wav': ['-c:a', 'pcm_s16le', '-f', 'wav'],  // 16-bit PCM
+                'aac': ['-c:a', 'aac', '-b:a', '192k', '-f', 'adts'],  // AAC 192kbps
+                'm4a': ['-c:a', 'aac', '-b:a', '192k', '-f', 'ipod'],  // M4A с оптимизацией для Apple
+                'opus': ['-c:a', 'libopus', '-b:a', '128k', '-f', 'opus'],  // Opus 128kbps
+                'vorbis': ['-c:a', 'libvorbis', '-q:a', '5', '-f', 'ogg'],  // Vorbis качество 5
+                'flac': ['-c:a', 'flac', '-f', 'flac']  // Lossless FLAC
+            };
+            
+            return params[format] || params['mp3'];  // Default to MP3 if format not found
+        }
+        
+        /**
+         * Возвращает правильный MIME type для аудио формата
+         */
+        function getAudioMimeType(format) {
+            const mimeTypes = {
+                'mp3': 'audio/mpeg',
+                'wav': 'audio/wav',
+                'aac': 'audio/aac',
+                'm4a': 'audio/mp4',
+                'opus': 'audio/opus',
+                'vorbis': 'audio/ogg',
+                'flac': 'audio/flac'
+            };
+            
+            return mimeTypes[format] || 'audio/mpeg';
+        }
+
         // ===== ГЛАВНАЯ ФУНКЦИЯ КОНВЕРТАЦИИ =====
         
         async function startConversion(file) {
@@ -1264,7 +1432,20 @@ ${escapeHtml(text)}
                     'markdown-html': () => convertMarkdownToHtml(file),
                     'html-markdown': () => convertHtmlToMarkdown(file),
                     'html-pdf': () => convertHtmlToPdf(file),
-                    'txt-html': () => convertTxtToHtml(file)
+                    'txt-html': () => convertTxtToHtml(file),
+                    // Видео и аудио конвертация (FFmpeg)
+                    'mp4-mp3': () => convertAudioVideo(file, 'mp3'),
+                    'webm-mp3': () => convertAudioVideo(file, 'mp3'),
+                    'mov-mp3': () => convertAudioVideo(file, 'mp3'),
+                    '3gp-mp3': () => convertAudioVideo(file, 'mp3'),
+                    'mp4-wav': () => convertAudioVideo(file, 'wav'),
+                    'webm-wav': () => convertAudioVideo(file, 'wav'),
+                    'mp4-aac': () => convertAudioVideo(file, 'aac'),
+                    'webm-aac': () => convertAudioVideo(file, 'aac'),
+                    'mp4-m4a': () => convertAudioVideo(file, 'm4a'),
+                    'mkv-mp3': () => convertAudioVideo(file, 'mp3'),
+                    'flv-mp3': () => convertAudioVideo(file, 'mp3'),
+                    'avi-mp3': () => convertAudioVideo(file, 'mp3')
                 };
 
                 const converter = converters[conversionType];
