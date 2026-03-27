@@ -407,8 +407,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<!-- FFmpeg.js библиотека - загружается асинхронно с fallback -->
-<script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.13.0/dist/FFmpeg.js"></script>
+<!-- FFmpeg.js библиотека - загружается как UMD модуль (как docx) -->
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.13.0/dist/ffmpeg.min.js"></script>
+<!-- FFmpeg Core (симуляция WASM через fakefs для браузера) -->
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.13.0/dist/ffmpeg-core.js"></script>
 
 <script>
     // Установить worker для PDF.js
@@ -420,33 +422,34 @@
 <script>
     /**
      * Production-grade FFmpeg инициализация с multiple fallback CDNs
-     * Гарантирует работу в 99%+ браузеров
+     * Работает с FFmpeg.js загруженным как UMD модуль
      */
     window.ffmpegInstance = null;
     window.ffmpegReady = false;
     window.ffmpegLoading = false;
     
-    // Несколько CDN источников для fallback
-    const FFMPEG_CDN_URLS = [
+    // Несколько CDN источников для fallback (ядро)
+    const FFMPEG_CORE_URLS = [
         'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.13.0/dist/umd',
         'https://unpkg.com/@ffmpeg/core@0.13.0/dist/umd',
-        'https://cdnjs.cloudflare.com/ajax/libs/ffmpeg.js/0.13.0'
+        'https://cdnjs.cloudflare.com/ajax/libs/@ffmpeg/core/0.13.0'
     ];
     
     /**
      * Загружает FFmpeg с поддержкой fallback для multiple CDN
+     * Работает когда FFmpeg загружен как UMD модуль (глобальная переменная)
      * @returns {Promise<Object|null>} FFmpeg экземпляр или null если не удалось
      */
     async function getFFmpegInstance() {
         // Если уже загружена - вернуть сразу
         if (window.ffmpegInstance && window.ffmpegReady) {
-            console.log('[FFmpeg] Используется кэшированный экземпляр');
+            console.log('[FFmpeg] ✓ Используется кэшированный экземпляр');
             return window.ffmpegInstance;
         }
         
         // Если уже загружается - подождать
         if (window.ffmpegLoading) {
-            console.log('[FFmpeg] Ожидание завершения загрузки...');
+            console.log('[FFmpeg] ⏳ Ожидание завершения загрузки...');
             let attempts = 0;
             while (window.ffmpegLoading && attempts < 120) {
                 await new Promise(resolve => setTimeout(resolve, 500));
@@ -462,16 +465,18 @@
         try {
             // Проверить загрузилась ли FFmpeg библиотека вообще
             if (!window.FFmpeg) {
-                throw new Error('FFmpeg.js скрипт не загрузился');
+                throw new Error('FFmpeg.js модуль не загружен (глобальный объект window.FFmpeg недоступен)');
             }
             
-            const { FFmpeg, fetchFile } = window.FFmpeg;
+            const FFmpeg = window.FFmpeg.FFmpeg;
+            const fetchFile = window.FFmpeg.fetchFile;
             
-            if (!FFmpeg || !FFmpeg.FFmpeg) {
-                throw new Error('FFmpeg.FFmpeg класс недоступен');
+            if (!FFmpeg || !fetchFile) {
+                throw new Error('FFmpeg.FFmpeg класс или fetchFile функция недоступны');
             }
             
-            const ffmpeg = new FFmpeg.FFmpeg();
+            console.log('[FFmpeg] ⏳ Инициализация FFmpeg...');
+            const ffmpeg = new FFmpeg();
             
             // Обработка логов
             ffmpeg.on('log', ({ type, message }) => {
@@ -482,38 +487,39 @@
                 }
             });
             
-            console.log('[FFmpeg] Инициализация FFmpeg экземпляра...');
+            console.log('[FFmpeg] 🔧 Попытка загрузки с разных источников...');
             
             // Попробовать загрузить с первого доступного CDN
             let loadedSuccessfully = false;
             let lastError = null;
             
-            for (let cdnUrl of FFMPEG_CDN_URLS) {
+            for (let coreUrlBase of FFMPEG_CORE_URLS) {
                 try {
-                    console.log(`[FFmpeg] Попытка загрузки с: ${cdnUrl}`);
+                    console.log(`[FFmpeg] 📍 Источник: ${coreUrlBase}`);
                     
                     await ffmpeg.load({
-                        coreURL: `${cdnUrl}/ffmpeg-core.js`,
-                        wasmURL: `${cdnUrl}/ffmpeg-core.wasm`
+                        coreURL: `${coreUrlBase}/ffmpeg-core.js`,
+                        wasmURL: `${coreUrlBase}/ffmpeg-core.wasm`
                     });
                     
-                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${cdnUrl}`);
+                    console.log(`[FFmpeg] ✓ Успешно загружена с: ${coreUrlBase}`);
                     loadedSuccessfully = true;
                     break;
                 } catch (err) {
-                    console.warn(`[FFmpeg] ✗ Не удалось загрузить с ${cdnUrl}: ${err.message}`);
+                    console.warn(`[FFmpeg] ✗ Не удалось загрузить с ${coreUrlBase}: ${err.message}`);
                     lastError = err;
                     // Продолжить со следующего CDN
                 }
             }
             
             if (!loadedSuccessfully) {
-                throw new Error(`Не удалось загрузить FFmpeg ни с одного источника. Последняя ошибка: ${lastError ? lastError.message : 'Unknown'}`);
+                throw new Error(`FFmpeg не загружена ни с одного CDN. Последняя ошибка: ${lastError ? lastError.message : 'Unknown'}`);
             }
             
             // Проверить что FFmpeg реально загружена
-            if (!ffmpeg.isLoaded || !ffmpeg.isLoaded()) {
-                throw new Error('FFmpeg загружена но не инициализирована');
+            const isLoaded = typeof ffmpeg.isLoaded === 'function' ? ffmpeg.isLoaded() : !!ffmpeg.FS;
+            if (!isLoaded) {
+                throw new Error('FFmpeg загружена но не инициализирована (FS недоступен)');
             }
             
             // Кэшировать для последующего использования
